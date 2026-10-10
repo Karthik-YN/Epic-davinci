@@ -1,0 +1,187 @@
+/**
+ * app.js — Main SPA router and bootstrap
+ * Handles navigation between pages, URL hash routing,
+ * and global error handling.
+ */
+
+import { Dashboard }    from './pages/dashboard.js';
+import { DailyLog }     from './pages/dailyLog.js';
+import { Calendar }     from './pages/calendar.js';
+import { Trends }       from './pages/trends.js';
+import { FinalReview }  from './pages/finalReview.js';
+import { Settings }     from './pages/settings.js';
+import { showToast }    from './utils.js';
+
+// ─── Page Registry ──────────────────────────────────────────────
+const PAGES = {
+  'dashboard':     Dashboard,
+  'daily-log':     DailyLog,
+  'calendar':      Calendar,
+  'trends':        Trends,
+  'final-review':  FinalReview,
+  'settings':      Settings,
+};
+
+const DEFAULT_PAGE = 'dashboard';
+
+// Currently active page instance and key
+let currentPage    = null;
+let currentPageKey = null;
+
+// ─── Navigation ─────────────────────────────────────────────────
+/**
+ * Navigate to a named page, optionally passing params.
+ * Updates nav state, renders page, updates URL hash.
+ * @param {string} pageKey  e.g. 'dashboard', 'daily-log'
+ * @param {object} [params] optional params forwarded to page.render()
+ */
+export async function navigate(pageKey, params = {}) {
+  const PageClass = PAGES[pageKey];
+
+  if (!PageClass) {
+    console.warn(`[router] Unknown page: "${pageKey}". Falling back to dashboard.`);
+    return navigate(DEFAULT_PAGE);
+  }
+
+  const container = document.getElementById('main-content');
+  if (!container) return;
+
+  // ── Prevent navigating away from dirty form (daily log) ──────
+  if (
+    currentPage &&
+    typeof currentPage.isDirty === 'function' &&
+    currentPage.isDirty() &&
+    pageKey !== currentPageKey
+  ) {
+    const { showConfirm } = await import('./utils.js');
+    const ok = await showConfirm('You have unsaved changes. Leave anyway?');
+    if (!ok) {
+      // Restore hash without triggering another navigation
+      _suppressHashChange = true;
+      window.location.hash = `#${currentPageKey}`;
+      setTimeout(() => { _suppressHashChange = false; }, 50);
+      return;
+    }
+  }
+
+  // ── Update nav active state ───────────────────────────────────
+  _updateNavActive(pageKey);
+
+  // ── Show loading indicator ────────────────────────────────────
+  container.innerHTML = '<div class="page-loading"><div class="spinner" aria-label="Loading…"></div></div>';
+
+  // ── Instantiate and render page ───────────────────────────────
+  const page = new PageClass();
+  currentPage    = page;
+  currentPageKey = pageKey;
+
+  try {
+    await page.render(container, params);
+  } catch (err) {
+    console.error(`[router] Error rendering page "${pageKey}":`, err);
+    _renderPageError(container, err);
+  }
+
+  // ── Update URL hash (without re-triggering hashchange) ────────
+  _suppressHashChange = true;
+  const paramStr = Object.keys(params).length
+    ? '?' + new URLSearchParams(params).toString()
+    : '';
+  window.location.hash = `#${pageKey}${paramStr}`;
+  setTimeout(() => { _suppressHashChange = false; }, 50);
+}
+
+// ─── Hash Parsing ────────────────────────────────────────────────
+/** Parse '#page-key?foo=bar' → { page, params } */
+function _parseHash(hash) {
+  const raw = (hash || '').replace(/^#/, '');
+  const [pagePart, queryPart] = raw.split('?');
+  const page   = pagePart || DEFAULT_PAGE;
+  const params = queryPart ? Object.fromEntries(new URLSearchParams(queryPart)) : {};
+  return { page, params };
+}
+
+// ─── Nav Active State ────────────────────────────────────────────
+function _updateNavActive(pageKey) {
+  document.querySelectorAll('.nav-link').forEach((link) => {
+    const linkPage = link.dataset.page;
+    link.classList.toggle('active', linkPage === pageKey);
+    link.setAttribute('aria-current', linkPage === pageKey ? 'page' : 'false');
+  });
+}
+
+// ─── Page Error Fallback ─────────────────────────────────────────
+function _renderPageError(container, err) {
+  const isNetwork = err.message && err.message.includes('connect to server');
+
+  container.innerHTML = ''; // Clear
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'empty-state';
+
+  const icon = document.createElement('span');
+  icon.className = 'empty-state-icon';
+  icon.textContent = isNetwork ? '🔌' : '⚠️';
+
+  const title = document.createElement('div');
+  title.className = 'empty-state-title';
+  title.textContent = isNetwork ? 'Cannot reach server' : 'Something went wrong';
+
+  const text = document.createElement('p');
+  text.className = 'empty-state-text';
+  text.textContent = err.message || 'An unexpected error occurred.';
+
+  const retryBtn = document.createElement('button');
+  retryBtn.className = 'btn btn-primary';
+  retryBtn.textContent = 'Retry';
+  retryBtn.addEventListener('click', () => navigate(currentPageKey || DEFAULT_PAGE));
+
+  wrapper.appendChild(icon);
+  wrapper.appendChild(title);
+  wrapper.appendChild(text);
+  wrapper.appendChild(retryBtn);
+  container.appendChild(wrapper);
+}
+
+// ─── Hash Change Guard ───────────────────────────────────────────
+let _suppressHashChange = false;
+
+// ─── Event Setup ─────────────────────────────────────────────────
+function _setupNav() {
+  // Sidebar + bottom nav link clicks
+  document.addEventListener('click', (e) => {
+    const link = e.target.closest('.nav-link[data-page]');
+    if (!link) return;
+    e.preventDefault();
+    const page = link.dataset.page;
+    if (page) navigate(page);
+  });
+}
+
+function _setupHashChange() {
+  window.addEventListener('hashchange', () => {
+    if (_suppressHashChange) return;
+    const { page, params } = _parseHash(window.location.hash);
+    navigate(page, params);
+  });
+}
+
+// ─── Global Error Handler ────────────────────────────────────────
+function _setupGlobalErrorHandling() {
+  window.addEventListener('unhandledrejection', (e) => {
+    const msg = e.reason?.message || 'An unexpected error occurred.';
+    console.error('[unhandled rejection]', e.reason);
+    showToast(msg, 'error', 6000);
+  });
+}
+
+// ─── Bootstrap ───────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  _setupNav();
+  _setupHashChange();
+  _setupGlobalErrorHandling();
+
+  // Navigate to the page in the URL hash, or default
+  const { page, params } = _parseHash(window.location.hash);
+  navigate(PAGES[page] ? page : DEFAULT_PAGE, params);
+});
