@@ -33,6 +33,13 @@ app.use(express.json({ limit: '1mb' }));
 // Serve static files from public/
 app.use(express.static(path.join(__dirname, '../public')));
 
+// API: wait for the database schema to be ready, and never let browsers cache data
+const db = require('./db/database');
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  db.ready.then(() => next(), next);
+});
+
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
@@ -70,6 +77,11 @@ const PORT = process.env.PORT || 3000;
 
 // Only listen when running directly (not when imported by tests)
 if (require.main === module) {
+  db.ready.catch((err) => {
+    console.error('[DB] Could not open the database:', err.message);
+    console.error('     Check TURSO_DATABASE_URL / TURSO_AUTH_TOKEN (or DB_PATH).');
+  });
+
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n🚀 Epic Davinci Tracker running on port ${PORT}`);
     console.log(`   Local:   http://localhost:${PORT}`);
@@ -84,7 +96,7 @@ if (require.main === module) {
       }
     }
 
-    console.log(`\n   DB:        ${process.env.DB_PATH || path.join(__dirname, '../data/tracker.db')}\n`);
+    console.log(`\n   DB:        ${db.location}\n`);
   });
 }
 

@@ -938,28 +938,55 @@ export class DailyLog {
 
   _markDirty() {
     this._isDirty = true;
+    this._editCount = (this._editCount || 0) + 1;
     setSaveStatus('unsaved');
     this._debouncedSave();
   }
 
-  async save() {
-    if (!this._isDirty && this._savedDate === this.currentDate) return;
+  /**
+   * Save the form. Only one request runs at a time; a save asked for while one
+   * is in flight runs right after it, so the newest values always win.
+   */
+  save() {
+    if (this._saving) {
+      this._saveAgain = true;
+      return this._saving;
+    }
+    if (!this._isDirty && this._savedDate === this.currentDate) return Promise.resolve();
 
+    this._saving = this._saveNow().finally(() => {
+      this._saving = null;
+      if (this._saveAgain) {
+        this._saveAgain = false;
+        if (this._isDirty) this.save();
+      }
+    });
+    return this._saving;
+  }
+
+  async _saveNow() {
     setSaveStatus('saving');
 
     // Clean payload
     const payload = { ...this.formData, date: this.currentDate };
+    const editsAtSend = this._editCount;
 
     // Clear previous inline field errors
     document.querySelectorAll('.field-error').forEach(el => el.textContent = '');
 
     try {
       const saved = await api.post(`/api/logs/${this.currentDate}`, payload);
+      this._savedDate = this.currentDate;
+      if (this._editCount !== editsAtSend) {
+        // Typed while the request was in flight: keep those edits (still unsaved)
+        this._saveAgain = true;
+        setSaveStatus('unsaved');
+        return;
+      }
       this.formData = saved;
       this._isDirty = false;
-      this._savedDate = this.currentDate;
       setSaveStatus('saved');
-      setTimeout(() => setSaveStatus(null), 3000);
+      setTimeout(() => { if (!this._isDirty && !this._saving) setSaveStatus(null); }, 3000);
       this._loadBudgetSummary();
     } catch (err) {
       setSaveStatus('error');

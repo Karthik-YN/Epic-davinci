@@ -9,15 +9,18 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db/database');
+const { asyncHandler } = require('../utils/asyncHandler');
 
 // ---------------------------------------------------------------------------
 // GET /api/export/json
 // ---------------------------------------------------------------------------
-router.get('/json', (req, res) => {
-  const logs     = db.prepare('SELECT * FROM daily_logs ORDER BY date ASC').all();
-  const settings = db.prepare('SELECT * FROM challenge_settings WHERE id = 1').get();
-  const challenges = db.prepare('SELECT * FROM challenges ORDER BY start_date ASC').all();
-  const notes      = db.prepare('SELECT * FROM challenge_notes ORDER BY challenge_id ASC, id ASC').all();
+router.get('/json', asyncHandler(async (req, res) => {
+  const [logs, settings, challenges, notes] = await Promise.all([
+    db.all('SELECT * FROM daily_logs ORDER BY date ASC'),
+    db.get('SELECT * FROM challenge_settings WHERE id = 1'),
+    db.all('SELECT * FROM challenges ORDER BY start_date ASC'),
+    db.all('SELECT * FROM challenge_notes ORDER BY challenge_id ASC, id ASC'),
+  ]);
 
   const payload = {
     version: '1.0.0',
@@ -38,13 +41,13 @@ router.get('/json', (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.json(payload);
-});
+}));
 
 // ---------------------------------------------------------------------------
 // GET /api/export/csv
 // ---------------------------------------------------------------------------
-router.get('/csv', (req, res) => {
-  const rows = db.prepare('SELECT * FROM daily_logs ORDER BY date ASC').all();
+router.get('/csv', asyncHandler(async (req, res) => {
+  const rows = await db.all('SELECT * FROM daily_logs ORDER BY date ASC');
 
   if (rows.length === 0) {
     // Return headers only
@@ -95,6 +98,6 @@ router.get('/csv', (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.send(lines.join('\n'));
-});
+}));
 
 module.exports = router;

@@ -8,15 +8,15 @@
 
 /**
  * Run all CREATE TABLE IF NOT EXISTS statements and seed default settings.
- * @param {import('better-sqlite3').Database} db
+ * @param {typeof import('./database')} db
  */
-function initDb(db) {
-  // Remember whether the challenges table is new, so the legacy challenge is seeded only once
-  const hadChallengesTable = !!db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'challenges'")
-    .get();
+async function initDb(db) {
+  // Remember whether the challenges table is new, so the legacy challenge is carried over only once
+  const hadChallengesTable = !!(await db.get(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'challenges'"
+  ));
 
-  db.exec(`
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS daily_logs (
       id                      INTEGER PRIMARY KEY AUTOINCREMENT,
       date                    TEXT NOT NULL UNIQUE,
@@ -153,12 +153,12 @@ function initDb(db) {
   `);
 
   // Add columns introduced after the first release to existing databases
-  addMissingColumns(db, 'daily_logs', {
+  await addMissingColumns(db, 'daily_logs', {
     carbs_g: 'REAL',
     fat_g:   'REAL',
     fiber_g: 'REAL',
   });
-  addMissingColumns(db, 'challenge_settings', {
+  await addMissingColumns(db, 'challenge_settings', {
     calorie_target_kcal: 'REAL DEFAULT 2200',
     protein_target_g:    'REAL DEFAULT 140',
     carbs_target_g:      'REAL DEFAULT 220',
@@ -168,33 +168,41 @@ function initDb(db) {
   });
 
   // Seed default settings row (id=1) if it doesn't exist yet
-  db.prepare(`
+  await db.run(`
     INSERT OR IGNORE INTO challenge_settings (id, start_date, end_date, review_date, budget_inr, weight_min, weight_max)
     VALUES (1, '2026-10-12', '2026-11-01', '2026-11-02', 1500, 30, 200)
-  `).run();
+  `);
 
-  // Carry the original 21-day challenge over as the first challenge in the list
+  // A database from before challenges existed: carry its 21-day window over as the first
+  // challenge, but only if it actually holds logs for it. A brand-new database starts empty,
+  // so a challenge the user deleted is never re-created.
   if (!hadChallengesTable) {
-    const settings = db.prepare('SELECT start_date, end_date FROM challenge_settings WHERE id = 1').get();
-    const now = new Date().toISOString();
-    db.prepare(`
-      INSERT INTO challenges (name, start_date, end_date, priority, created_at, updated_at)
-      VALUES ('21-Day Challenge', @start, @end, 'high', @now, @now)
-    `).run({ start: settings.start_date, end: settings.end_date, now });
+    const settings = await db.get('SELECT start_date, end_date FROM challenge_settings WHERE id = 1');
+    const hasLogs = await db.get(
+      'SELECT 1 AS found FROM daily_logs WHERE date BETWEEN @start AND @end LIMIT 1',
+      { start: settings.start_date, end: settings.end_date }
+    );
+    if (hasLogs) {
+      const now = new Date().toISOString();
+      await db.run(`
+        INSERT INTO challenges (name, start_date, end_date, priority, created_at, updated_at)
+        VALUES ('21-Day Challenge', @start, @end, 'high', @now, @now)
+      `, { start: settings.start_date, end: settings.end_date, now });
+    }
   }
 }
 
 /**
  * ALTER TABLE ADD COLUMN for every column in `columns` the table doesn't have yet.
- * @param {import('better-sqlite3').Database} db
+ * @param {typeof import('./database')} db
  * @param {string} table
  * @param {Object<string, string>} columns  name → type definition
  */
-function addMissingColumns(db, table, columns) {
-  const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
+async function addMissingColumns(db, table, columns) {
+  const existing = new Set((await db.all(`PRAGMA table_info(${table})`)).map(c => c.name));
   for (const [name, type] of Object.entries(columns)) {
     if (!existing.has(name)) {
-      db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+      await db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type};`);
     }
   }
 }

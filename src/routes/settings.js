@@ -9,6 +9,9 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db/database');
+const { asyncHandler } = require('../utils/asyncHandler');
+
+const SELECT_SETTINGS = 'SELECT * FROM challenge_settings WHERE id = 1';
 
 // Updatable numeric fields – must be >= 0 if provided
 const NUMERIC_SETTINGS = [
@@ -28,18 +31,18 @@ const NUMERIC_SETTINGS = [
 // ---------------------------------------------------------------------------
 // GET /api/settings
 // ---------------------------------------------------------------------------
-router.get('/', (req, res) => {
-  const settings = db.prepare('SELECT * FROM challenge_settings WHERE id = 1').get();
+router.get('/', asyncHandler(async (req, res) => {
+  const settings = await db.get(SELECT_SETTINGS);
   if (!settings) {
     return res.status(404).json({ error: 'Settings not found' });
   }
   res.json(settings);
-});
+}));
 
 // ---------------------------------------------------------------------------
 // PUT /api/settings
 // ---------------------------------------------------------------------------
-router.put('/', (req, res) => {
+router.put('/', asyncHandler(async (req, res) => {
   const body = req.body;
   const errors = {};
 
@@ -95,17 +98,15 @@ router.put('/', (req, res) => {
 
   if (updates.length === 0) {
     // Nothing to update – return current settings
-    const settings = db.prepare('SELECT * FROM challenge_settings WHERE id = 1').get();
-    return res.json(settings);
+    return res.json(await db.get(SELECT_SETTINGS));
   }
 
   updates.push('updated_at = @updated_at');
   params.updated_at = now;
 
-  db.prepare(`UPDATE challenge_settings SET ${updates.join(', ')} WHERE id = 1`).run(params);
+  await db.run(`UPDATE challenge_settings SET ${updates.join(', ')} WHERE id = 1`, params);
 
-  const updated = db.prepare('SELECT * FROM challenge_settings WHERE id = 1').get();
-  res.json(updated);
-});
+  res.json(await db.get(SELECT_SETTINGS));
+}));
 
 module.exports = router;

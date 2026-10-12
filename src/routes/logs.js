@@ -14,7 +14,8 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db/database');
 const { calculateSleepDurationMin } = require('../utils/dateUtils');
-const { challengeRange, isDateInAnyChallenge } = require('../utils/challenge');
+const { resolveChallengeRange, isDateInAnyChallenge } = require('../utils/challenge');
+const { asyncHandler } = require('../utils/asyncHandler');
 const { validateDailyLog } = require('../utils/validation');
 
 // ---------------------------------------------------------------------------
@@ -76,47 +77,50 @@ function coerceNumeric(field, val) {
 // ---------------------------------------------------------------------------
 // GET /api/logs  – all logs ordered by date (?challengeId=N limits to that challenge)
 // ---------------------------------------------------------------------------
-router.get('/', (req, res) => {
+router.get('/', asyncHandler(async (req, res) => {
   if (req.query.challengeId === undefined) {
-    return res.json(db.prepare('SELECT * FROM daily_logs ORDER BY date ASC').all());
+    return res.json(await db.all('SELECT * FROM daily_logs ORDER BY date ASC'));
   }
-  challengeRange(req, res, () => {
-    const rows = db
-      .prepare('SELECT * FROM daily_logs WHERE date BETWEEN ? AND ? ORDER BY date ASC')
-      .all(req.range.start, req.range.end);
-    res.json(rows);
-  });
-});
+  const range = await resolveChallengeRange(req);
+  if (!range) {
+    return res.status(404).json({ error: 'Challenge not found' });
+  }
+  const rows = await db.all(
+    'SELECT * FROM daily_logs WHERE date BETWEEN @start AND @end ORDER BY date ASC',
+    { start: range.start, end: range.end }
+  );
+  res.json(rows);
+}));
 
 // ---------------------------------------------------------------------------
 // GET /api/logs/:date/exists
 // ---------------------------------------------------------------------------
-router.get('/:date/exists', (req, res) => {
+router.get('/:date/exists', asyncHandler(async (req, res) => {
   const { date } = req.params;
-  const row = db.prepare('SELECT id FROM daily_logs WHERE date = ?').get(date);
+  const row = await db.get('SELECT id FROM daily_logs WHERE date = @date', { date });
   res.json({ exists: !!row, date });
-});
+}));
 
 // ---------------------------------------------------------------------------
 // GET /api/logs/:date
 // ---------------------------------------------------------------------------
-router.get('/:date', (req, res) => {
+router.get('/:date', asyncHandler(async (req, res) => {
   const { date } = req.params;
-  const row = db.prepare('SELECT * FROM daily_logs WHERE date = ?').get(date);
+  const row = await db.get('SELECT * FROM daily_logs WHERE date = @date', { date });
   if (!row) {
     return res.status(404).json({ error: 'Log not found for this date', date });
   }
   res.json(row);
-});
+}));
 
 // ---------------------------------------------------------------------------
 // POST /api/logs/:date  – upsert
 // ---------------------------------------------------------------------------
-router.post('/:date', (req, res) => {
+router.post('/:date', asyncHandler(async (req, res) => {
   const { date } = req.params;
 
   // 1. Validate challenge date (must fall inside one of the user's challenges)
-  if (!isDateInAnyChallenge(date)) {
+  if (!(await isDateInAnyChallenge(date))) {
     return res.status(400).json({
       error: 'Invalid or out-of-range challenge date',
       date,
@@ -127,7 +131,8 @@ router.post('/:date', (req, res) => {
   const body = { ...req.body, date };
 
   // 2. Validate fields
-  const { valid, errors } = validateDailyLog(body, { isValidDate: isDateInAnyChallenge });
+  // (the date was checked above, so only the field rules remain)
+  const { valid, errors } = validateDailyLog(body, { isValidDate: () => true });
   if (!valid) {
     return res.status(400).json({ error: 'Validation failed', errors });
   }
@@ -147,7 +152,7 @@ router.post('/:date', (req, res) => {
   }
 
   // 4. Check if record already exists (to preserve created_at)
-  const existing = db.prepare('SELECT created_at FROM daily_logs WHERE date = ?').get(date);
+  const existing = await db.get('SELECT created_at FROM daily_logs WHERE date = @date', { date });
   const now = new Date().toISOString();
   const createdAt = existing ? existing.created_at : now;
 
@@ -171,11 +176,11 @@ router.post('/:date', (req, res) => {
   const placeholders = cols.map(c => `@${c}`).join(', ');
   const sql = `INSERT OR REPLACE INTO daily_logs (${cols.join(', ')}) VALUES (${placeholders})`;
 
-  db.prepare(sql).run(values);
+  await db.run(sql, values);
 
   // 7. Return saved record
-  const saved = db.prepare('SELECT * FROM daily_logs WHERE date = ?').get(date);
+  const saved = await db.get('SELECT * FROM daily_logs WHERE date = @date', { date });
   res.json(saved);
-});
+}));
 
 module.exports = router;

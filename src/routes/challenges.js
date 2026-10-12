@@ -19,6 +19,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db/database');
 const { isValidDateStr, daysInclusive } = require('../utils/dateUtils');
+const { asyncHandler } = require('../utils/asyncHandler');
 
 const PRIORITIES      = ['high', 'medium', 'low'];
 const NOTE_CATEGORIES = ['priority', 'important', 'note', 'reminder'];
@@ -35,7 +36,11 @@ function withDuration(challenge) {
 }
 
 function getChallenge(id) {
-  return db.prepare('SELECT * FROM challenges WHERE id = ?').get(Number(id));
+  return db.get('SELECT * FROM challenges WHERE id = @id', { id: Number(id) || 0 });
+}
+
+function getNote(id) {
+  return db.get('SELECT * FROM challenge_notes WHERE id = @id', { id: Number(id) });
 }
 
 /**
@@ -82,18 +87,18 @@ function normalizeBudget(val) {
 // ---------------------------------------------------------------------------
 // Challenges
 // ---------------------------------------------------------------------------
-router.get('/', (req, res) => {
-  const rows = db.prepare(`
+router.get('/', asyncHandler(async (req, res) => {
+  const rows = await db.all(`
     SELECT c.*,
       (SELECT COUNT(*) FROM challenge_notes n WHERE n.challenge_id = c.id) AS notes_count,
       (SELECT COUNT(*) FROM daily_logs l WHERE l.date BETWEEN c.start_date AND c.end_date) AS days_logged
     FROM challenges c
     ORDER BY c.start_date DESC, c.id DESC
-  `).all();
+  `);
   res.json(rows.map(withDuration));
-});
+}));
 
-router.post('/', (req, res) => {
+router.post('/', asyncHandler(async (req, res) => {
   const body = req.body || {};
   const errors = validateChallenge(body);
   if (Object.keys(errors).length > 0) {
@@ -101,10 +106,10 @@ router.post('/', (req, res) => {
   }
 
   const now = new Date().toISOString();
-  const info = db.prepare(`
+  const info = await db.run(`
     INSERT INTO challenges (name, start_date, end_date, priority, description, budget_inr, created_at, updated_at)
     VALUES (@name, @start_date, @end_date, @priority, @description, @budget_inr, @now, @now)
-  `).run({
+  `, {
     name: body.name.trim(),
     start_date: body.start_date,
     end_date: body.end_date,
@@ -114,17 +119,17 @@ router.post('/', (req, res) => {
     now,
   });
 
-  res.status(201).json(withDuration(getChallenge(info.lastInsertRowid)));
-});
+  res.status(201).json(withDuration(await getChallenge(info.lastInsertRowid)));
+}));
 
-router.get('/:id', (req, res) => {
-  const challenge = getChallenge(req.params.id);
+router.get('/:id', asyncHandler(async (req, res) => {
+  const challenge = await getChallenge(req.params.id);
   if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
   res.json(withDuration(challenge));
-});
+}));
 
-router.put('/:id', (req, res) => {
-  const existing = getChallenge(req.params.id);
+router.put('/:id', asyncHandler(async (req, res) => {
+  const existing = await getChallenge(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Challenge not found' });
 
   const body = req.body || {};
@@ -134,12 +139,12 @@ router.put('/:id', (req, res) => {
   }
 
   const merged = { ...existing, ...body };
-  db.prepare(`
+  await db.run(`
     UPDATE challenges
     SET name = @name, start_date = @start_date, end_date = @end_date, priority = @priority,
         description = @description, budget_inr = @budget_inr, updated_at = @now
     WHERE id = @id
-  `).run({
+  `, {
     id: existing.id,
     name: merged.name.trim(),
     start_date: merged.start_date,
@@ -150,17 +155,17 @@ router.put('/:id', (req, res) => {
     now: new Date().toISOString(),
   });
 
-  res.json(withDuration(getChallenge(existing.id)));
-});
+  res.json(withDuration(await getChallenge(existing.id)));
+}));
 
-router.delete('/:id', (req, res) => {
-  const existing = getChallenge(req.params.id);
+router.delete('/:id', asyncHandler(async (req, res) => {
+  const existing = await getChallenge(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Challenge not found' });
 
-  db.prepare('DELETE FROM challenge_notes WHERE challenge_id = ?').run(existing.id);
-  db.prepare('DELETE FROM challenges WHERE id = ?').run(existing.id);
+  await db.run('DELETE FROM challenge_notes WHERE challenge_id = @id', { id: existing.id });
+  await db.run('DELETE FROM challenges WHERE id = @id', { id: existing.id });
   res.json({ deleted: true, id: existing.id });
-});
+}));
 
 // ---------------------------------------------------------------------------
 // Notes
@@ -189,16 +194,17 @@ const NOTE_ORDER = `
     id ASC
 `;
 
-router.get('/:id/notes', (req, res) => {
-  if (!getChallenge(req.params.id)) return res.status(404).json({ error: 'Challenge not found' });
-  const notes = db
-    .prepare(`SELECT * FROM challenge_notes WHERE challenge_id = ? ${NOTE_ORDER}`)
-    .all(Number(req.params.id));
+router.get('/:id/notes', asyncHandler(async (req, res) => {
+  if (!(await getChallenge(req.params.id))) return res.status(404).json({ error: 'Challenge not found' });
+  const notes = await db.all(
+    `SELECT * FROM challenge_notes WHERE challenge_id = @id ${NOTE_ORDER}`,
+    { id: Number(req.params.id) }
+  );
   res.json(notes);
-});
+}));
 
-router.post('/:id/notes', (req, res) => {
-  const challenge = getChallenge(req.params.id);
+router.post('/:id/notes', asyncHandler(async (req, res) => {
+  const challenge = await getChallenge(req.params.id);
   if (!challenge) return res.status(404).json({ error: 'Challenge not found' });
 
   const body = req.body || {};
@@ -208,10 +214,10 @@ router.post('/:id/notes', (req, res) => {
   }
 
   const now = new Date().toISOString();
-  const info = db.prepare(`
+  const info = await db.run(`
     INSERT INTO challenge_notes (challenge_id, category, content, done, created_at, updated_at)
     VALUES (@challenge_id, @category, @content, @done, @now, @now)
-  `).run({
+  `, {
     challenge_id: challenge.id,
     category: body.category || 'note',
     content: body.content.trim(),
@@ -219,13 +225,14 @@ router.post('/:id/notes', (req, res) => {
     now,
   });
 
-  res.status(201).json(db.prepare('SELECT * FROM challenge_notes WHERE id = ?').get(info.lastInsertRowid));
-});
+  res.status(201).json(await getNote(info.lastInsertRowid));
+}));
 
-router.put('/:id/notes/:nid', (req, res) => {
-  const existing = db
-    .prepare('SELECT * FROM challenge_notes WHERE id = ? AND challenge_id = ?')
-    .get(Number(req.params.nid), Number(req.params.id));
+router.put('/:id/notes/:nid', asyncHandler(async (req, res) => {
+  const existing = await db.get(
+    'SELECT * FROM challenge_notes WHERE id = @nid AND challenge_id = @id',
+    { nid: Number(req.params.nid) || 0, id: Number(req.params.id) || 0 }
+  );
   if (!existing) return res.status(404).json({ error: 'Note not found' });
 
   const body = req.body || {};
@@ -235,10 +242,10 @@ router.put('/:id/notes/:nid', (req, res) => {
   }
 
   const merged = { ...existing, ...body };
-  db.prepare(`
+  await db.run(`
     UPDATE challenge_notes SET category = @category, content = @content, done = @done, updated_at = @now
     WHERE id = @id
-  `).run({
+  `, {
     id: existing.id,
     category: merged.category,
     content: merged.content.trim(),
@@ -246,15 +253,16 @@ router.put('/:id/notes/:nid', (req, res) => {
     now: new Date().toISOString(),
   });
 
-  res.json(db.prepare('SELECT * FROM challenge_notes WHERE id = ?').get(existing.id));
-});
+  res.json(await getNote(existing.id));
+}));
 
-router.delete('/:id/notes/:nid', (req, res) => {
-  const info = db
-    .prepare('DELETE FROM challenge_notes WHERE id = ? AND challenge_id = ?')
-    .run(Number(req.params.nid), Number(req.params.id));
+router.delete('/:id/notes/:nid', asyncHandler(async (req, res) => {
+  const info = await db.run(
+    'DELETE FROM challenge_notes WHERE id = @nid AND challenge_id = @id',
+    { nid: Number(req.params.nid) || 0, id: Number(req.params.id) || 0 }
+  );
   if (info.changes === 0) return res.status(404).json({ error: 'Note not found' });
   res.json({ deleted: true, id: Number(req.params.nid) });
-});
+}));
 
 module.exports = router;
