@@ -17,55 +17,55 @@ const router  = express.Router();
 const db      = require('../db/database');
 const { todayStr, daysInclusive } = require('../utils/dateUtils');
 const { challengeRange } = require('../utils/challenge');
+const { asyncHandler } = require('../utils/asyncHandler');
 
 router.use(challengeRange);
 
 // Restricts a daily_logs query to the requested challenge window
 const IN_RANGE = 'date BETWEEN @start AND @end';
 
+/** Query parameters for IN_RANGE. */
+function rangeArgs(req) {
+  return { start: req.range.start, end: req.range.end };
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/stats/overview
 // ---------------------------------------------------------------------------
-router.get('/overview', (req, res) => {
+router.get('/overview', asyncHandler(async (req, res) => {
   const { start, end, totalDays } = req.range;
-  const daysLogged = db.prepare(`SELECT COUNT(*) AS cnt FROM daily_logs WHERE ${IN_RANGE}`).get(req.range).cnt;
-  const daysWithData = db
-    .prepare(`SELECT date FROM daily_logs WHERE ${IN_RANGE} ORDER BY date ASC`)
-    .all(req.range)
-    .map(r => r.date);
+  const daysWithData = (await db.all(
+    `SELECT date FROM daily_logs WHERE ${IN_RANGE} ORDER BY date ASC`,
+    rangeArgs(req)
+  )).map(r => r.date);
 
   const today = todayStr();
 
   res.json({
     totalDays,
-    daysLogged,
+    daysLogged: daysWithData.length,
     challengeStartDate: start,
     challengeEndDate: end,
     today,
     todayDay: today >= start && today <= end ? daysInclusive(start, today) : null,
     daysWithData,
   });
-});
+}));
 
 // ---------------------------------------------------------------------------
 // GET /api/stats/spending
 // ---------------------------------------------------------------------------
-router.get('/spending', (req, res) => {
-  const budget = getBudget(req.range);
+router.get('/spending', asyncHandler(async (req, res) => {
+  const budget = await getBudget(req.range);
 
-  const totalRow = db
-    .prepare(`SELECT SUM(extra_spent_inr) AS total FROM daily_logs WHERE extra_spent_inr IS NOT NULL AND ${IN_RANGE}`)
-    .get(req.range);
-  const totalSpent = totalRow.total !== null ? totalRow.total : 0;
+  const byDay = await db.all(`
+    SELECT date, extra_spent_inr AS amount, spending_category AS category, spending_note AS note
+    FROM daily_logs
+    WHERE extra_spent_inr IS NOT NULL AND ${IN_RANGE}
+    ORDER BY date ASC
+  `, rangeArgs(req));
 
-  const byDay = db
-    .prepare(`
-      SELECT date, extra_spent_inr AS amount, spending_category AS category, spending_note AS note
-      FROM daily_logs
-      WHERE extra_spent_inr IS NOT NULL AND ${IN_RANGE}
-      ORDER BY date ASC
-    `)
-    .all(req.range);
+  const totalSpent = byDay.reduce((sum, d) => sum + d.amount, 0);
 
   res.json({
     totalSpent,
@@ -73,96 +73,85 @@ router.get('/spending', (req, res) => {
     remaining: budget - totalSpent,
     byDay,
   });
-});
+}));
 
 // ---------------------------------------------------------------------------
 // GET /api/stats/trends
 // ---------------------------------------------------------------------------
-router.get('/trends', (req, res) => {
-  const weights = db
-    .prepare(`SELECT date, weight_kg AS value FROM daily_logs WHERE weight_kg IS NOT NULL AND ${IN_RANGE} ORDER BY date ASC`)
-    .all(req.range);
+router.get('/trends', asyncHandler(async (req, res) => {
+  const rows = await db.all(`
+    SELECT date, weight_kg, total_steps, protein_g, water_l, sleep_duration_min,
+           career_study_min, calories_kcal, extra_spent_inr
+    FROM daily_logs
+    WHERE ${IN_RANGE}
+    ORDER BY date ASC
+  `, rangeArgs(req));
 
-  const steps = db
-    .prepare(`SELECT date, total_steps AS value FROM daily_logs WHERE total_steps IS NOT NULL AND ${IN_RANGE} ORDER BY date ASC`)
-    .all(req.range);
+  // One { date, value } series per metric, skipping days where it wasn't logged
+  const series = (field, transform = v => v) => rows
+    .filter(r => r[field] !== null && r[field] !== undefined)
+    .map(r => ({ date: r.date, value: transform(r[field]) }));
+  const toHours = mins => parseFloat((mins / 60).toFixed(2));
 
-  const protein = db
-    .prepare(`SELECT date, protein_g AS value FROM daily_logs WHERE protein_g IS NOT NULL AND ${IN_RANGE} ORDER BY date ASC`)
-    .all(req.range);
-
-  const water = db
-    .prepare(`SELECT date, water_l AS value FROM daily_logs WHERE water_l IS NOT NULL AND ${IN_RANGE} ORDER BY date ASC`)
-    .all(req.range);
-
-  const sleepRaw = db
-    .prepare(`SELECT date, sleep_duration_min FROM daily_logs WHERE sleep_duration_min IS NOT NULL AND ${IN_RANGE} ORDER BY date ASC`)
-    .all(req.range);
-  const sleep = sleepRaw.map(r => ({
-    date: r.date,
-    value: parseFloat((r.sleep_duration_min / 60).toFixed(2)),
-  }));
-
-  const studyRaw = db
-    .prepare(`SELECT date, career_study_min FROM daily_logs WHERE career_study_min IS NOT NULL AND ${IN_RANGE} ORDER BY date ASC`)
-    .all(req.range);
-  const studyHours = studyRaw.map(r => ({
-    date: r.date,
-    value: parseFloat((r.career_study_min / 60).toFixed(2)),
-  }));
-
-  const calories = db
-    .prepare(`SELECT date, calories_kcal AS value FROM daily_logs WHERE calories_kcal IS NOT NULL AND ${IN_RANGE} ORDER BY date ASC`)
-    .all(req.range);
-
-  const spending = db
-    .prepare(`SELECT date, extra_spent_inr AS value FROM daily_logs WHERE extra_spent_inr IS NOT NULL AND ${IN_RANGE} ORDER BY date ASC`)
-    .all(req.range);
-
-  res.json({ weights, steps, protein, water, sleep, studyHours, calories, spending });
-});
+  res.json({
+    weights:    series('weight_kg'),
+    steps:      series('total_steps'),
+    protein:    series('protein_g'),
+    water:      series('water_l'),
+    sleep:      series('sleep_duration_min', toHours),
+    studyHours: series('career_study_min', toHours),
+    calories:   series('calories_kcal'),
+    spending:   series('extra_spent_inr'),
+  });
+}));
 
 // ---------------------------------------------------------------------------
 // GET /api/stats/habits
 // ---------------------------------------------------------------------------
-router.get('/habits', (req, res) => {
-  const HABIT_FIELDS = [
-    'cardio_completed',
-    'fruits_veggies',
-    'junk_food',
-    'within_calorie_target',
-    'planned_meals_tomorrow',
-    'brush_teeth',
-    'tongue_scrape',
-    'floss',
-    'morning_skincare',
-    'night_skincare',
-    'hanuman_chalisa',
-    'porn_free',
-    'masturbation_free',
-    'social_media_limit',
-    'podcast',
-    'communication',
-    'planned_tomorrow',
-    'bed_setup',
-    'body_detox',
-    'shower',
-    'room_reset',
-    'stockings',
-    'plank_completed',
-  ];
+const HABIT_FIELDS = [
+  'cardio_completed',
+  'fruits_veggies',
+  'junk_food',
+  'within_calorie_target',
+  'planned_meals_tomorrow',
+  'brush_teeth',
+  'tongue_scrape',
+  'floss',
+  'morning_skincare',
+  'night_skincare',
+  'hanuman_chalisa',
+  'porn_free',
+  'masturbation_free',
+  'social_media_limit',
+  'podcast',
+  'communication',
+  'planned_tomorrow',
+  'bed_setup',
+  'body_detox',
+  'shower',
+  'room_reset',
+  'stockings',
+  'plank_completed',
+];
 
-  const results = HABIT_FIELDS.map(habit => {
-    const row = db.prepare(`
-      SELECT
-        COUNT(CASE WHEN ${habit} IS NOT NULL THEN 1 END) AS applicable_days,
-        COUNT(CASE WHEN ${habit} = 1 THEN 1 END)         AS completed_days
-      FROM daily_logs
-      WHERE ${IN_RANGE}
-    `).get(req.range);
+router.get('/habits', asyncHandler(async (req, res) => {
+  // One query for every habit: <habit>_a = applicable days, <habit>_c = completed days
+  const counts = HABIT_FIELDS.map(h => `
+    COUNT(CASE WHEN ${h} IS NOT NULL THEN 1 END) AS ${h}_a,
+    COUNT(CASE WHEN ${h} = 1 THEN 1 END)         AS ${h}_c`).join(',');
 
-    const applicable = row.applicable_days;
-    const completed  = row.completed_days;
+  const row = await db.get(`
+    SELECT ${counts},
+      -- hair_care: only 0/1 count as applicable (2 = not scheduled)
+      COUNT(CASE WHEN hair_care IN (0, 1) THEN 1 END) AS hair_care_a,
+      COUNT(CASE WHEN hair_care = 1       THEN 1 END) AS hair_care_c
+    FROM daily_logs
+    WHERE ${IN_RANGE}
+  `, rangeArgs(req));
+
+  const results = [...HABIT_FIELDS, 'hair_care'].map(habit => {
+    const applicable = row[`${habit}_a`];
+    const completed  = row[`${habit}_c`];
     return {
       habit,
       applicable_days: applicable,
@@ -171,92 +160,53 @@ router.get('/habits', (req, res) => {
     };
   });
 
-  // hair_care: only count rows where hair_care IN (0, 1) as applicable
-  const hairRow = db.prepare(`
-    SELECT
-      COUNT(CASE WHEN hair_care IN (0, 1) THEN 1 END) AS applicable_days,
-      COUNT(CASE WHEN hair_care = 1         THEN 1 END) AS completed_days
-    FROM daily_logs
-    WHERE ${IN_RANGE}
-  `).get(req.range);
-
-  results.push({
-    habit: 'hair_care',
-    applicable_days: hairRow.applicable_days,
-    completed_days: hairRow.completed_days,
-    rate: hairRow.applicable_days > 0 ? hairRow.completed_days / hairRow.applicable_days : null,
-  });
-
   res.json(results);
-});
+}));
 
 // ---------------------------------------------------------------------------
 // GET /api/stats/final-review
 // ---------------------------------------------------------------------------
-router.get('/final-review', (req, res) => {
-  const settings = db.prepare('SELECT * FROM challenge_settings WHERE id = 1').get();
-
+router.get('/final-review', asyncHandler(async (req, res) => {
   const { start, end, totalDays } = req.range;
-  const day1Row  = db.prepare('SELECT weight_kg FROM daily_logs WHERE date = ?').get(start);
-  const day21Row = db.prepare('SELECT weight_kg FROM daily_logs WHERE date = ?').get(end);
+  const args = rangeArgs(req);
 
-  const day1Weight  = day1Row  ? day1Row.weight_kg  : null;
-  const day21Weight = day21Row ? day21Row.weight_kg : null;
+  const [settings, day1Row, dayNRow, agg, budget] = await Promise.all([
+    db.get('SELECT * FROM challenge_settings WHERE id = 1'),
+    db.get('SELECT weight_kg FROM daily_logs WHERE date = @start', args),
+    db.get('SELECT weight_kg FROM daily_logs WHERE date = @end', args),
+    db.get(`
+      SELECT
+        COUNT(*)                                       AS days_logged,
+        AVG(total_steps)                               AS steps_avg,
+        COUNT(total_steps)                             AS steps_cnt,
+        COUNT(CASE WHEN workout_type IS NOT NULL
+                    AND workout_type NOT IN ('Rest', 'Recovery') THEN 1 END) AS gym_cnt,
+        COUNT(CASE WHEN cardio_completed = 1 THEN 1 END) AS cardio_cnt,
+        AVG(sleep_duration_min)                        AS sleep_avg,
+        COUNT(sleep_duration_min)                      AS sleep_cnt,
+        AVG(protein_g)                                 AS protein_avg,
+        COUNT(protein_g)                               AS protein_cnt,
+        SUM(career_study_min)                          AS study_total,
+        SUM(extra_spent_inr)                           AS spent_total
+      FROM daily_logs
+      WHERE ${IN_RANGE}
+    `, args),
+    getBudget(req.range),
+  ]);
+
+  const day1Weight  = day1Row ? day1Row.weight_kg : null;
+  const day21Weight = dayNRow ? dayNRow.weight_kg : null;
   const weightChange = (day1Weight !== null && day21Weight !== null)
     ? parseFloat((day21Weight - day1Weight).toFixed(2))
     : null;
 
-  const waistStart  = settings ? settings.waist_start_cm  : null;
-  const waistEnd    = settings ? settings.waist_end_cm    : null;
+  const waistStart  = settings ? settings.waist_start_cm : null;
+  const waistEnd    = settings ? settings.waist_end_cm   : null;
   const waistChange = (waistStart !== null && waistEnd !== null)
     ? parseFloat((waistEnd - waistStart).toFixed(2))
     : null;
 
-  // avgSteps
-  const stepsRow = db.prepare(`
-    SELECT AVG(total_steps) AS avg, COUNT(total_steps) AS cnt
-    FROM daily_logs WHERE total_steps IS NOT NULL AND ${IN_RANGE}
-  `).get(req.range);
-
-  // totalGymSessions
-  const gymRow = db.prepare(`
-    SELECT COUNT(*) AS cnt FROM daily_logs
-    WHERE workout_type IS NOT NULL
-      AND workout_type NOT IN ('Rest', 'Recovery')
-      AND ${IN_RANGE}
-  `).get(req.range);
-
-  // totalCardioSessions
-  const cardioRow = db.prepare(`
-    SELECT COUNT(*) AS cnt FROM daily_logs WHERE cardio_completed = 1 AND ${IN_RANGE}
-  `).get(req.range);
-
-  // avgSleep
-  const sleepRow = db.prepare(`
-    SELECT AVG(sleep_duration_min) AS avg, COUNT(sleep_duration_min) AS cnt
-    FROM daily_logs WHERE sleep_duration_min IS NOT NULL AND ${IN_RANGE}
-  `).get(req.range);
-
-  // avgProtein
-  const proteinRow = db.prepare(`
-    SELECT AVG(protein_g) AS avg, COUNT(protein_g) AS cnt
-    FROM daily_logs WHERE protein_g IS NOT NULL AND ${IN_RANGE}
-  `).get(req.range);
-
-  // totalStudyHours
-  const studyRow = db.prepare(`
-    SELECT SUM(career_study_min) AS total FROM daily_logs WHERE career_study_min IS NOT NULL AND ${IN_RANGE}
-  `).get(req.range);
-
-  // totalSpent
-  const spentRow = db.prepare(`
-    SELECT SUM(extra_spent_inr) AS total FROM daily_logs WHERE extra_spent_inr IS NOT NULL AND ${IN_RANGE}
-  `).get(req.range);
-
-  const totalSpent = spentRow.total !== null ? spentRow.total : 0;
-  const budget = getBudget(req.range);
-
-  const daysLogged = db.prepare(`SELECT COUNT(*) AS cnt FROM daily_logs WHERE ${IN_RANGE}`).get(req.range).cnt;
+  const totalSpent = agg.spent_total !== null ? agg.spent_total : 0;
 
   res.json({
     day1Weight,
@@ -266,23 +216,23 @@ router.get('/final-review', (req, res) => {
     waistEnd,
     waistChange,
     avgSteps: {
-      value: stepsRow.avg !== null ? parseFloat(stepsRow.avg.toFixed(0)) : null,
-      count: stepsRow.cnt,
+      value: agg.steps_avg !== null ? parseFloat(agg.steps_avg.toFixed(0)) : null,
+      count: agg.steps_cnt,
     },
-    totalGymSessions: gymRow.cnt,
-    totalCardioSessions: cardioRow.cnt,
+    totalGymSessions: agg.gym_cnt,
+    totalCardioSessions: agg.cardio_cnt,
     avgSleep: {
-      value: sleepRow.avg !== null ? parseFloat((sleepRow.avg / 60).toFixed(2)) : null,
-      count: sleepRow.cnt,
+      value: agg.sleep_avg !== null ? parseFloat((agg.sleep_avg / 60).toFixed(2)) : null,
+      count: agg.sleep_cnt,
     },
     avgProtein: {
-      value: proteinRow.avg !== null ? parseFloat(proteinRow.avg.toFixed(1)) : null,
-      count: proteinRow.cnt,
+      value: agg.protein_avg !== null ? parseFloat(agg.protein_avg.toFixed(1)) : null,
+      count: agg.protein_cnt,
     },
-    totalStudyHours: studyRow.total !== null ? parseFloat((studyRow.total / 60).toFixed(2)) : 0,
+    totalStudyHours: agg.study_total !== null ? parseFloat((agg.study_total / 60).toFixed(2)) : 0,
     totalSpent,
     budgetRemaining: budget - totalSpent,
-    daysLogged,
+    daysLogged: agg.days_logged,
     totalDays,
     startDate: start,
     endDate: end,
@@ -290,15 +240,15 @@ router.get('/final-review', (req, res) => {
     challenge: req.range.challenge,
     settings: settings || null,
   });
-});
+}));
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 /** Challenge-specific budget when set, otherwise the global budget from settings. */
-function getBudget(range) {
+async function getBudget(range) {
   if (range.challenge && range.challenge.budget_inr != null) return range.challenge.budget_inr;
-  const settings = db.prepare('SELECT budget_inr FROM challenge_settings WHERE id = 1').get();
+  const settings = await db.get('SELECT budget_inr FROM challenge_settings WHERE id = 1');
   return settings ? settings.budget_inr : 1500;
 }
 

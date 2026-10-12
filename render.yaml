@@ -2,10 +2,16 @@ services:
   - type: web
     name: epic-davinci-tracker
     env: node
-    buildCommand: npm install && npm rebuild better-sqlite3 --build-from-source
+    buildCommand: npm install
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
         value: 20.11.0
       - key: PORT
         value: 10000
+      # Permanent storage (Render's free disk is wiped on every restart).
+      # Set both values in the Render dashboard; see DEPLOY.md.
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false

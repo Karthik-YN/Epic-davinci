@@ -65,9 +65,7 @@ export async function navigate(pageKey, params = {}) {
     const ok = await showConfirm('You have unsaved changes. Leave anyway?');
     if (!ok) {
       // Restore hash without triggering another navigation
-      _suppressHashChange = true;
-      window.location.hash = `#${currentPageKey}`;
-      setTimeout(() => { _suppressHashChange = false; }, 50);
+      _setHashSilently(`#${currentPageKey}`);
       return;
     }
   }
@@ -97,12 +95,10 @@ export async function navigate(pageKey, params = {}) {
   }
 
   // ── Update URL hash (without re-triggering hashchange) ────────
-  _suppressHashChange = true;
   const paramStr = Object.keys(params).length
     ? '?' + new URLSearchParams(params).toString()
     : '';
-  window.location.hash = `#${pageKey}${paramStr}`;
-  setTimeout(() => { _suppressHashChange = false; }, 50);
+  _setHashSilently(`#${pageKey}${paramStr}`);
 }
 
 // ─── Active Challenge ────────────────────────────────────────────
@@ -176,7 +172,15 @@ function _renderPageError(container, err) {
 }
 
 // ─── Hash Change Guard ───────────────────────────────────────────
-let _suppressHashChange = false;
+// The hash the router itself just set: its hashchange event is ignored, while
+// any other hash change (typed URL, back button, link) still navigates.
+let _ownHash = null;
+
+function _setHashSilently(hash) {
+  if (window.location.hash === hash) return; // no hashchange will fire
+  _ownHash = hash;
+  window.location.hash = hash;
+}
 
 // ─── Event Setup ─────────────────────────────────────────────────
 function _setupNav() {
@@ -192,7 +196,11 @@ function _setupNav() {
 
 function _setupHashChange() {
   window.addEventListener('hashchange', () => {
-    if (_suppressHashChange) return;
+    if (_ownHash !== null && window.location.hash === _ownHash) {
+      _ownHash = null;
+      return;
+    }
+    _ownHash = null;
     const { page, params } = _parseHash(window.location.hash);
     navigate(page, params);
   });

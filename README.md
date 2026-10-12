@@ -97,11 +97,15 @@ When your phone and laptop are on the **same Wi-Fi network**:
 
 ## Data Storage
 
-All data is stored locally in a SQLite database:
+By default, data is stored locally in a SQLite database:
 
 ```
 epic-davinci/data/tracker.db
 ```
+
+When `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are set, data is stored in a hosted
+[Turso](https://turso.tech) database instead, so it survives restarts on hosts with a temporary
+disk such as Render's free plan. See [DEPLOY.md](DEPLOY.md).
 
 **Backup:**
 ```bash
@@ -136,17 +140,29 @@ The safest restore method is to copy back the `tracker.db` file (see Backup abov
 ## Running Tests
 
 ```bash
-npm test
+npm test          # unit + API tests (Jest)
+npm run test:e2e  # browser tests (Playwright, Chromium)
 ```
 
-Tests cover:
+The first time, install the browser with `npx playwright install chromium`.
+Browser tests start the app on a throwaway database (never your real data or Turso).
+
+API tests cover:
 - Date utilities (challenge day calculation, sleep duration across midnight)
 - Input validation (all field types and boundaries)
 - API endpoints (create, read, update, persistence, duplicates)
-- Sleep duration calculations
-- Spending totals and budget
-- Final review statistics
-- Export functionality
+- Challenges, notes, challenge-scoped stats, nutrition targets and macros
+- Upgrading an old database (keeps logs, carries the 21-day challenge over once)
+- Sleep duration, spending totals and budget, final review statistics, export
+
+Browser tests cover:
+- Challenge Hub: create with presets / custom dates, validation, overlap warning,
+  active/upcoming/completed grouping, edit, delete (stays deleted), selection kept on reload
+- Priorities & notes: every category, tick off, delete, per-challenge, visible on every page
+- Daily Log: day navigation limits, autosave, toggles, sleep calculation and override,
+  nutrition targets, budget box, validation errors, no lost typing on a slow connection
+- Dashboard, Calendar (multi-month), Trends, Final Review, Settings, JSON/CSV export
+- Phone layout: top bar, notes drawer, bottom navigation, no sideways scrolling
 
 ---
 

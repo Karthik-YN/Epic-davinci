@@ -27,6 +27,35 @@ const BEFORE_START = '2026-10-11';
 const AFTER_END    = '2026-11-02';
 
 // ---------------------------------------------------------------------------
+// Fresh database
+// ---------------------------------------------------------------------------
+describe('Fresh database', () => {
+  test('starts with no challenges (nothing is re-created on startup)', async () => {
+    const res = await request(app).get('/api/challenges');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  test('logs are rejected while no challenge covers the date', async () => {
+    const res = await request(app).post(`/api/logs/${DAY1}`).send({ weight_kg: 70 });
+    expect(res.status).toBe(400);
+  });
+
+  test('API responses are never cached by the browser', async () => {
+    const res = await request(app).get('/api/challenges');
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  test('create the 21-day challenge used by the tests below', async () => {
+    const res = await request(app).post('/api/challenges').send({
+      name: '21-Day Challenge', start_date: DAY1, end_date: '2026-11-01', priority: 'high',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.total_days).toBe(21);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // POST → GET round-trip
 // ---------------------------------------------------------------------------
 describe('POST /api/logs/:date – upsert', () => {
@@ -368,7 +397,7 @@ describe('PUT /api/settings', () => {
 describe('Challenges API', () => {
   let weekId;
 
-  test('original 21-day challenge is seeded', async () => {
+  test('lists the 21-day challenge', async () => {
     const res = await request(app).get('/api/challenges');
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(1);

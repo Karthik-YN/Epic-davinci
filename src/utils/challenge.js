@@ -9,13 +9,14 @@
 
 const db = require('../db/database');
 const { CHALLENGE_START, CHALLENGE_END, daysInclusive } = require('./dateUtils');
+const { asyncHandler } = require('./asyncHandler');
 
 /**
  * @param {import('express').Request} req
- * @returns {{ start: string, end: string, totalDays: number, challenge: Object|null } | null}
+ * @returns {Promise<{ start: string, end: string, totalDays: number, challenge: Object|null } | null>}
  *          null when a challengeId was given but no such challenge exists
  */
-function resolveChallengeRange(req) {
+async function resolveChallengeRange(req) {
   const id = req.query.challengeId;
   if (id === undefined || id === '') {
     return {
@@ -26,7 +27,7 @@ function resolveChallengeRange(req) {
     };
   }
 
-  const challenge = db.prepare('SELECT * FROM challenges WHERE id = ?').get(Number(id));
+  const challenge = await db.get('SELECT * FROM challenges WHERE id = @id', { id: Number(id) || 0 });
   if (!challenge) return null;
 
   return {
@@ -40,25 +41,26 @@ function resolveChallengeRange(req) {
 /**
  * Express middleware: attaches req.range, or responds 404 for an unknown challengeId.
  */
-function challengeRange(req, res, next) {
-  const range = resolveChallengeRange(req);
+const challengeRange = asyncHandler(async (req, res, next) => {
+  const range = await resolveChallengeRange(req);
   if (!range) {
     return res.status(404).json({ error: 'Challenge not found' });
   }
   req.range = range;
   next();
-}
+});
 
 /**
  * True if dateStr falls inside at least one challenge.
  * @param {string} dateStr YYYY-MM-DD
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
-function isDateInAnyChallenge(dateStr) {
+async function isDateInAnyChallenge(dateStr) {
   if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
-  return !!db
-    .prepare('SELECT 1 FROM challenges WHERE start_date <= @d AND end_date >= @d LIMIT 1')
-    .get({ d: dateStr });
+  return !!(await db.get(
+    'SELECT 1 AS found FROM challenges WHERE start_date <= @d AND end_date >= @d LIMIT 1',
+    { d: dateStr }
+  ));
 }
 
 module.exports = { resolveChallengeRange, challengeRange, isDateInAnyChallenge };
