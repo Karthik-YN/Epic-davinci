@@ -1,14 +1,80 @@
 /**
- * utils.js — Shared utilities for Epic Davinci 21-Day Tracker
+ * utils.js — Shared utilities for Epic Davinci Challenge Tracker
  * Exports: api, showToast, showConfirm, formatDate, formatDateShort,
  *          getChallengeDay, todayStr, isValidChallengeDate,
  *          calculateSleepHours, debounce, formatDuration, formatCurrency
  */
 
-// ─── Challenge Constants ────────────────────────────────────────
-export const CHALLENGE_START = '2026-10-12';
-export const CHALLENGE_END   = '2026-11-01';
-export const REVIEW_DATE     = '2026-11-02';
+// ─── Active Challenge ───────────────────────────────────────────
+// These are live bindings: every page that imports them sees the window of
+// the challenge currently selected in the Challenge Hub.
+export let CHALLENGE_START = '2026-10-12';
+export let CHALLENGE_END   = '2026-11-01';
+export let REVIEW_DATE     = '2026-11-02';
+export let TOTAL_DAYS      = 21;
+
+const ACTIVE_CHALLENGE_KEY = 'epic-davinci.activeChallengeId';
+let _activeChallenge = null;
+
+/** Make `challenge` the one every page works with (null clears it). */
+export function setActiveChallenge(challenge) {
+  _activeChallenge = challenge || null;
+  if (challenge) {
+    CHALLENGE_START = challenge.start_date;
+    CHALLENGE_END   = challenge.end_date;
+    REVIEW_DATE     = addDays(challenge.end_date, 1);
+    TOTAL_DAYS      = daysInclusive(challenge.start_date, challenge.end_date);
+  }
+  try {
+    if (challenge) localStorage.setItem(ACTIVE_CHALLENGE_KEY, String(challenge.id));
+    else localStorage.removeItem(ACTIVE_CHALLENGE_KEY);
+  } catch (_) { /* storage unavailable — selection just won't survive a reload */ }
+  window.dispatchEvent(new CustomEvent('challenge-changed', { detail: _activeChallenge }));
+}
+
+export function getActiveChallenge() {
+  return _activeChallenge;
+}
+
+/** Id of the challenge selected in a previous visit, if any. */
+export function getStoredChallengeId() {
+  try {
+    return localStorage.getItem(ACTIVE_CHALLENGE_KEY);
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Append ?challengeId=… so stats/log queries are scoped to the active challenge. */
+export function withChallenge(url) {
+  if (!_activeChallenge) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}challengeId=${_activeChallenge.id}`;
+}
+
+/** Shift a 'YYYY-MM-DD' date by `days` (local, no UTC drift). */
+export function addDays(dateStr, days) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/** Days from start to end, both inclusive. */
+export function daysInclusive(start, end) {
+  const [sy, sm, sd] = start.split('-').map(Number);
+  const [ey, em, ed] = end.split('-').map(Number);
+  return Math.round((new Date(ey, em - 1, ed) - new Date(sy, sm - 1, sd)) / 86400000) + 1;
+}
+
+/** Escape a value for safe interpolation into innerHTML. */
+export function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
 // ─── API Wrapper ────────────────────────────────────────────────
 /**
@@ -172,18 +238,12 @@ export function todayStr() {
 }
 
 /**
- * Returns the 1-indexed challenge day (1–21) for a given YYYY-MM-DD date,
- * or null if the date is outside the challenge range.
+ * Returns the 1-indexed challenge day (1–TOTAL_DAYS) for a given YYYY-MM-DD date,
+ * or null if the date is outside the active challenge range.
  */
 export function getChallengeDay(dateStr) {
   if (!isValidChallengeDate(dateStr)) return null;
-  const start = new Date(CHALLENGE_START);
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const date  = new Date(y, m - 1, d);
-  // Start is always at midnight local — compare date-only
-  const startLocal = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-  const diff = Math.round((date - startLocal) / 86400000);
-  return diff + 1; // Day 1 = Oct 12
+  return daysInclusive(CHALLENGE_START, dateStr); // Day 1 = start date
 }
 
 /** Returns true iff dateStr is within [CHALLENGE_START, CHALLENGE_END] inclusive. */

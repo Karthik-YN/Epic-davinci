@@ -13,7 +13,8 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db/database');
-const { isValidChallengeDate, calculateSleepDurationMin } = require('../utils/dateUtils');
+const { calculateSleepDurationMin } = require('../utils/dateUtils');
+const { challengeRange, isDateInAnyChallenge } = require('../utils/challenge');
 const { validateDailyLog } = require('../utils/validation');
 
 // ---------------------------------------------------------------------------
@@ -23,7 +24,7 @@ const ALL_COLUMNS = [
   'date',
   'weight_kg', 'workout_type', 'workout_notes', 'cardio_completed',
   'cardio_duration_min', 'total_steps', 'plank_completed', 'plank_duration_sec',
-  'calories_kcal', 'protein_g', 'water_l', 'fruits_veggies', 'junk_food',
+  'calories_kcal', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'water_l', 'fruits_veggies', 'junk_food',
   'within_calorie_target', 'planned_meals_tomorrow', 'nutrition_notes',
   'bedtime', 'wake_time', 'sleep_duration_min', 'sleep_manual_override',
   'career_topic', 'career_practical', 'career_dsa', 'career_learned', 'career_study_min',
@@ -53,7 +54,7 @@ function coerce(val) {
 const NUMERIC_FIELDS = new Set([
   'weight_kg', 'cardio_completed', 'cardio_duration_min', 'total_steps',
   'plank_completed', 'plank_duration_sec',
-  'calories_kcal', 'protein_g', 'water_l', 'fruits_veggies', 'junk_food',
+  'calories_kcal', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'water_l', 'fruits_veggies', 'junk_food',
   'within_calorie_target', 'planned_meals_tomorrow',
   'sleep_duration_min', 'sleep_manual_override',
   'career_study_min',
@@ -73,11 +74,18 @@ function coerceNumeric(field, val) {
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/logs  – all logs ordered by date
+// GET /api/logs  – all logs ordered by date (?challengeId=N limits to that challenge)
 // ---------------------------------------------------------------------------
 router.get('/', (req, res) => {
-  const rows = db.prepare('SELECT * FROM daily_logs ORDER BY date ASC').all();
-  res.json(rows);
+  if (req.query.challengeId === undefined) {
+    return res.json(db.prepare('SELECT * FROM daily_logs ORDER BY date ASC').all());
+  }
+  challengeRange(req, res, () => {
+    const rows = db
+      .prepare('SELECT * FROM daily_logs WHERE date BETWEEN ? AND ? ORDER BY date ASC')
+      .all(req.range.start, req.range.end);
+    res.json(rows);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -107,8 +115,8 @@ router.get('/:date', (req, res) => {
 router.post('/:date', (req, res) => {
   const { date } = req.params;
 
-  // 1. Validate challenge date
-  if (!isValidChallengeDate(date)) {
+  // 1. Validate challenge date (must fall inside one of the user's challenges)
+  if (!isDateInAnyChallenge(date)) {
     return res.status(400).json({
       error: 'Invalid or out-of-range challenge date',
       date,
@@ -119,7 +127,7 @@ router.post('/:date', (req, res) => {
   const body = { ...req.body, date };
 
   // 2. Validate fields
-  const { valid, errors } = validateDailyLog(body);
+  const { valid, errors } = validateDailyLog(body, { isValidDate: isDateInAnyChallenge });
   if (!valid) {
     return res.status(400).json({ error: 'Validation failed', errors });
   }

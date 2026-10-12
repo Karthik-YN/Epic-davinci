@@ -95,6 +95,42 @@ function todayStr() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+/**
+ * Returns true if dateStr is a real calendar date in YYYY-MM-DD format.
+ * @param {string} dateStr
+ * @returns {boolean}
+ */
+function isValidDateStr(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
+}
+
+/**
+ * Number of days from start to end, both inclusive (2026-10-12 → 2026-11-01 = 21).
+ * @param {string} start YYYY-MM-DD
+ * @param {string} end   YYYY-MM-DD
+ * @returns {number}
+ */
+function daysInclusive(start, end) {
+  const [sy, sm, sd] = start.split('-').map(Number);
+  const [ey, em, ed] = end.split('-').map(Number);
+  return Math.round((Date.UTC(ey, em - 1, ed) - Date.UTC(sy, sm - 1, sd)) / 86400000) + 1;
+}
+
+/**
+ * Adds `days` to a YYYY-MM-DD date string.
+ * @param {string} dateStr
+ * @param {number} days
+ * @returns {string}
+ */
+function addDays(dateStr, days) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
 module.exports = {
   CHALLENGE_START,
   CHALLENGE_END,
@@ -105,4 +141,7 @@ module.exports = {
   calculateSleepDurationMin,
   formatDate,
   todayStr,
+  isValidDateStr,
+  daysInclusive,
+  addDays,
 };

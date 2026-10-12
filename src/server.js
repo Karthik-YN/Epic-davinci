@@ -36,6 +36,7 @@ app.use(express.static(path.join(__dirname, '../public')));
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
+app.use('/api/challenges', require('./routes/challenges'));
 app.use('/api/logs',     require('./routes/logs'));
 app.use('/api/stats',    require('./routes/stats'));
 app.use('/api/settings', require('./routes/settings'));
@@ -83,8 +84,7 @@ if (require.main === module) {
       }
     }
 
-    console.log(`\n   Challenge: 2026-10-12 → 2026-11-01`);
-    console.log(`   DB:        ${process.env.DB_PATH || path.join(__dirname, '../data/tracker.db')}\n`);
+    console.log(`\n   DB:        ${process.env.DB_PATH || path.join(__dirname, '../data/tracker.db')}\n`);
   });
 }
 

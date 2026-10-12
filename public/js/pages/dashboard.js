@@ -6,8 +6,8 @@
 import {
   api, showToast, formatDate, formatDateShort,
   getChallengeDay, todayStr, isValidChallengeDate,
-  CHALLENGE_START, CHALLENGE_END, REVIEW_DATE,
-  formatDuration, formatCurrency,
+  CHALLENGE_START, CHALLENGE_END, REVIEW_DATE, TOTAL_DAYS,
+  formatDuration, formatCurrency, withChallenge, getActiveChallenge,
 } from '../utils.js';
 import { navigate } from '../app.js';
 
@@ -18,9 +18,9 @@ export class Dashboard {
 
     // ── Pre-challenge state ──────────────────────────────────────
     if (today < CHALLENGE_START) {
-      const startDate  = new Date(CHALLENGE_START);
-      const todayDate  = new Date(today);
-      const daysUntil  = Math.ceil((startDate - todayDate) / 86400000);
+      const startDate  = new Date(CHALLENGE_START + 'T00:00:00');
+      const todayDate  = new Date(today + 'T00:00:00');
+      const daysUntil  = Math.round((startDate - todayDate) / 86400000);
       container.innerHTML = '';
       container.appendChild(_buildPreChallenge(daysUntil));
       return;
@@ -34,11 +34,12 @@ export class Dashboard {
     }
 
     // ── Fetch data in parallel ───────────────────────────────────
-    let overview = {}, spending = {}, todayLog = null;
+    let overview = {}, spending = {}, todayLog = null, settings = {};
     try {
-      [overview, spending] = await Promise.all([
-        api.get('/api/stats/overview').catch(() => ({})),
-        api.get('/api/stats/spending').catch(() => ({})),
+      [overview, spending, settings] = await Promise.all([
+        api.get(withChallenge('/api/stats/overview')).catch(() => ({})),
+        api.get(withChallenge('/api/stats/spending')).catch(() => ({})),
+        api.get('/api/settings').catch(() => ({})),
       ]);
       todayLog = await api.get(`/api/logs/${today}`).catch(e => {
         if (e.status === 404) return null;
@@ -64,7 +65,7 @@ export class Dashboard {
     page.appendChild(statsRow);
 
     // Key metrics
-    page.appendChild(_buildMetricsSection(todayLog));
+    page.appendChild(_buildMetricsSection(todayLog, settings));
 
     // Habit overview
     page.appendChild(_buildHabitOverview(todayLog, today));
@@ -83,9 +84,10 @@ function _buildHeader(today, dayNum) {
 
   const left = document.createElement('div');
 
+  const challenge = getActiveChallenge();
   const title = document.createElement('h1');
-  title.className = 'page-title';
-  title.textContent = 'Epic Davinci';
+  title.className = 'page-title hero-title';
+  title.textContent = challenge ? challenge.name : 'Epic Davinci';
 
   const subtitle = document.createElement('div');
   subtitle.className = 'page-subtitle';
@@ -96,7 +98,7 @@ function _buildHeader(today, dayNum) {
 
   const badge = document.createElement('span');
   badge.className = 'badge badge-day';
-  badge.textContent = dayNum ? `Day ${dayNum} of 21` : '';
+  badge.textContent = dayNum ? `Day ${dayNum} of ${TOTAL_DAYS}` : '';
 
   el.appendChild(left);
   if (dayNum) el.appendChild(badge);
@@ -105,7 +107,7 @@ function _buildHeader(today, dayNum) {
 
 // ─── Progress Card ───────────────────────────────────────────────
 function _buildProgressCard(dayNum) {
-  const pct = dayNum ? Math.round(((dayNum - 1) / 21) * 100) : 0;
+  const pct = dayNum ? Math.round(((dayNum - 1) / TOTAL_DAYS) * 100) : 0;
   const card = _card();
 
   const h = document.createElement('div');
@@ -117,7 +119,7 @@ function _buildProgressCard(dayNum) {
 
   const dayLabel = document.createElement('div');
   dayLabel.className = 'text-2xl font-bold text-accent mb-2';
-  dayLabel.textContent = `Day ${dayNum} of 21`;
+  dayLabel.textContent = `Day ${dayNum} of ${TOTAL_DAYS}`;
 
   const pctLabel = document.createElement('div');
   pctLabel.className = 'text-sm text-muted mb-3';
@@ -132,7 +134,8 @@ function _buildProgressCard(dayNum) {
 
   const remaining = document.createElement('div');
   remaining.className = 'text-xs text-muted mt-2';
-  remaining.textContent = `${21 - dayNum + 1} day${(21 - dayNum + 1) !== 1 ? 's' : ''} remaining`;
+  const left = TOTAL_DAYS - dayNum + 1;
+  remaining.textContent = `${left} day${left !== 1 ? 's' : ''} remaining`;
 
   card.appendChild(h);
   card.appendChild(dayLabel);
@@ -188,7 +191,7 @@ function _buildTodayStatusCard(todayLog, today) {
 // ─── Budget Card ─────────────────────────────────────────────────
 function _buildBudgetCard(spending) {
   const card  = _card();
-  const total = spending.total_spent ?? null;
+  const total = spending.totalSpent ?? null;
   const budget = spending.budget ?? 1500;
   const remaining = total != null ? budget - total : null;
 
@@ -225,7 +228,7 @@ function _buildBudgetCard(spending) {
 }
 
 // ─── Key Metrics Today ───────────────────────────────────────────
-function _buildMetricsSection(log) {
+function _buildMetricsSection(log, settings = {}) {
   const section = document.createElement('div');
   section.className = 'mb-6';
 
@@ -240,8 +243,9 @@ function _buildMetricsSection(log) {
   const metrics = [
     { icon: '⚖️', label: 'Weight',  value: log?.weight_kg != null ? `${log.weight_kg} kg` : null },
     { icon: '👟', label: 'Steps',   value: log?.total_steps != null ? log.total_steps.toLocaleString('en-IN') : null },
-    { icon: '🥩', label: 'Protein', value: log?.protein_g != null ? `${log.protein_g} g` : null },
-    { icon: '💧', label: 'Water',   value: log?.water_l != null ? `${log.water_l} L` : null },
+    { icon: '🔥', label: 'Calories', value: _withTarget(log?.calories_kcal, settings.calorie_target_kcal, 'kcal') },
+    { icon: '🥩', label: 'Protein', value: _withTarget(log?.protein_g, settings.protein_target_g, 'g') },
+    { icon: '💧', label: 'Water',   value: _withTarget(log?.water_l, settings.water_target_l, 'L') },
     { icon: '😴', label: 'Sleep',   value: _sleepValue(log) },
     { icon: '📚', label: 'Study',   value: log?.career_study_min != null ? formatDuration(log.career_study_min) : null },
   ];
@@ -272,10 +276,16 @@ function _buildMetricsSection(log) {
   return section;
 }
 
+/** '120 / 140 g' when a target is set, '120 g' otherwise, null when not logged. */
+function _withTarget(value, target, unit) {
+  if (value == null) return null;
+  return target != null ? `${value} / ${target} ${unit}` : `${value} ${unit}`;
+}
+
 function _sleepValue(log) {
   if (!log) return null;
-  if (log.sleep_duration_override_min != null) {
-    return formatDuration(log.sleep_duration_override_min);
+  if (log.sleep_duration_min != null) {
+    return formatDuration(log.sleep_duration_min);
   }
   if (log.bedtime && log.wake_time) {
     const { calculateSleepHours } = window._utils || {};
@@ -314,22 +324,24 @@ function _buildHabitOverview(log, today) {
     { key: 'nutrition',    label: '🥗 Nutrition',        field: 'within_calorie_target' },
     { key: 'sleep',        label: '😴 Sleep',            field: 'bedtime' },
     { key: 'career',       label: '📚 Career / AI-ML',  field: 'career_study_min' },
-    { key: 'care',         label: '✨ Oral & Skin Care', field: 'brushed_teeth_twice' },
+    { key: 'care',         label: '✨ Oral & Skin Care', field: 'brush_teeth' },
     { key: 'spirituality', label: '🙏 Spirituality',     field: 'hanuman_chalisa' },
-    { key: 'mental',       label: '🧠 Mental Discipline',field: 'pornfree_day' },
-    { key: 'growth',       label: '🌱 Personal Growth',  field: 'podcast_listened' },
+    { key: 'mental',       label: '🧠 Mental Discipline',field: 'porn_free' },
+    { key: 'growth',       label: '🌱 Personal Growth',  field: 'podcast' },
     { key: 'routine',      label: '🏠 Personal Routine', field: 'bed_setup' },
-    { key: 'financial',    label: '💰 Financial',        field: 'extra_money_spent' },
+    { key: 'financial',    label: '💰 Financial',        field: 'extra_spent_inr', anyValue: true },
   ];
 
   const list = document.createElement('div');
   list.className = 'habit-list';
 
-  aspects.forEach(({ key, label, field }) => {
+  aspects.forEach(({ key, label, field, anyValue }) => {
     const val = log?.[field];
     let status = 'missing';
     if (log && val !== null && val !== undefined) {
-      status = val === 1 || (typeof val === 'number' && val > 0) ? 'complete' : 'incomplete';
+      // Spending counts as done once recorded (₹0 is a good day, not a miss)
+      status = anyValue || val === 1 || (typeof val === 'string' && val !== '') || (typeof val === 'number' && val > 0)
+        ? 'complete' : 'incomplete';
     }
 
     const row = document.createElement('div');
@@ -365,7 +377,7 @@ function _buildFooter(dayNum, today) {
   const footer = document.createElement('div');
   footer.className = 'text-sm text-muted text-center mt-4';
 
-  const daysLeft = 21 - (dayNum || 0) + 1;
+  const daysLeft = TOTAL_DAYS - (dayNum || 0) + 1;
   const p1 = document.createElement('p');
   p1.textContent = `${daysLeft} day${daysLeft !== 1 ? 's' : ''} remaining in the challenge`;
 
@@ -392,7 +404,7 @@ function _buildPreChallenge(daysUntil) {
 
   const text = document.createElement('p');
   text.className = 'empty-state-text';
-  text.textContent = `The 21-day challenge begins on ${formatDate(CHALLENGE_START)}. ${daysUntil} day${daysUntil !== 1 ? 's' : ''} to go!`;
+  text.textContent = `This ${TOTAL_DAYS}-day challenge begins on ${formatDate(CHALLENGE_START)}. ${daysUntil} day${daysUntil !== 1 ? 's' : ''} to go! You can already add priorities and notes in the sidebar.`;
 
   el.appendChild(icon);
   el.appendChild(title);
@@ -415,7 +427,7 @@ function _buildPostChallenge() {
 
   const text = document.createElement('p');
   text.className = 'empty-state-text';
-  text.textContent = 'The 21-day challenge has ended. Head to Final Review to see your results.';
+  text.textContent = `This ${TOTAL_DAYS}-day challenge ended on ${formatDate(CHALLENGE_END)}. Head to Final Review to see your results.`;
 
   const btn = document.createElement('button');
   btn.className = 'btn btn-primary';
