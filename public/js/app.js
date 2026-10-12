@@ -4,16 +4,21 @@
  * and global error handling.
  */
 
+import { ChallengeHub } from './pages/challenges.js';
 import { Dashboard }    from './pages/dashboard.js';
 import { DailyLog }     from './pages/dailyLog.js';
 import { Calendar }     from './pages/calendar.js';
 import { Trends }       from './pages/trends.js';
 import { FinalReview }  from './pages/finalReview.js';
 import { Settings }     from './pages/settings.js';
-import { showToast }    from './utils.js';
+import {
+  api, showToast, getActiveChallenge, setActiveChallenge, getStoredChallengeId,
+} from './utils.js';
+import { initSidebar }  from './sidebar.js';
 
 // ─── Page Registry ──────────────────────────────────────────────
 const PAGES = {
+  'challenges':    ChallengeHub,
   'dashboard':     Dashboard,
   'daily-log':     DailyLog,
   'calendar':      Calendar,
@@ -22,7 +27,10 @@ const PAGES = {
   'settings':      Settings,
 };
 
-const DEFAULT_PAGE = 'dashboard';
+const DEFAULT_PAGE = 'challenges';
+
+// Pages that only make sense inside a selected challenge
+const CHALLENGE_PAGES = new Set(['dashboard', 'daily-log', 'calendar', 'trends', 'final-review']);
 
 // Currently active page instance and key
 let currentPage    = null;
@@ -64,6 +72,12 @@ export async function navigate(pageKey, params = {}) {
     }
   }
 
+  // ── Challenge pages need a selected challenge ─────────────────
+  if (CHALLENGE_PAGES.has(pageKey) && !(await _ensureActiveChallenge())) {
+    showToast('Pick a challenge first', 'info', 2500);
+    return navigate('challenges');
+  }
+
   // ── Update nav active state ───────────────────────────────────
   _updateNavActive(pageKey);
 
@@ -89,6 +103,24 @@ export async function navigate(pageKey, params = {}) {
     : '';
   window.location.hash = `#${pageKey}${paramStr}`;
   setTimeout(() => { _suppressHashChange = false; }, 50);
+}
+
+// ─── Active Challenge ────────────────────────────────────────────
+/**
+ * Make sure a challenge is selected, restoring the one picked on a previous
+ * visit. Returns false when there is none to restore.
+ */
+async function _ensureActiveChallenge() {
+  if (getActiveChallenge()) return true;
+  const storedId = getStoredChallengeId();
+  if (!storedId) return false;
+  try {
+    setActiveChallenge(await api.get(`/api/challenges/${storedId}`));
+    return true;
+  } catch (err) {
+    if (err.status === 404) setActiveChallenge(null); // deleted since last visit
+    return false;
+  }
 }
 
 // ─── Hash Parsing ────────────────────────────────────────────────
@@ -176,10 +208,14 @@ function _setupGlobalErrorHandling() {
 }
 
 // ─── Bootstrap ───────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   _setupNav();
   _setupHashChange();
   _setupGlobalErrorHandling();
+  initSidebar();
+
+  // Restore the last selected challenge so the sidebar shows it on any page
+  await _ensureActiveChallenge();
 
   // Navigate to the page in the URL hash, or default
   const { page, params } = _parseHash(window.location.hash);

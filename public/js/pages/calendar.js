@@ -1,10 +1,13 @@
 /**
  * calendar.js — Challenge Calendar page
- * Visual month grids (October & November 2026) showing logging status
- * for each date in the 21-day challenge.
+ * Visual month grids for every month the active challenge touches, showing
+ * logging status for each challenge day.
  */
 
-import { api, formatDateShort, getChallengeDay, todayStr, CHALLENGE_START, CHALLENGE_END } from '../utils.js';
+import {
+  api, formatDate, getChallengeDay, todayStr, withChallenge, addDays,
+  CHALLENGE_START, CHALLENGE_END, TOTAL_DAYS,
+} from '../utils.js';
 
 export class Calendar {
   async render(container) {
@@ -12,7 +15,7 @@ export class Calendar {
       <div class="calendar-page">
         <header class="page-header mb-6">
           <h1 class="page-title">Challenge Calendar</h1>
-          <p class="page-subtitle text-muted">October 12, 2026 – November 1, 2026 (21 Days)</p>
+          <p class="page-subtitle text-muted">${formatDate(CHALLENGE_START)} – ${formatDate(CHALLENGE_END)} (${TOTAL_DAYS} Day${TOTAL_DAYS !== 1 ? 's' : ''})</p>
         </header>
 
         <div id="calendar-content" class="flex flex-col gap-8">
@@ -22,7 +25,7 @@ export class Calendar {
     `;
 
     try {
-      const logs = await api.get('/api/logs');
+      const logs = await api.get(withChallenge('/api/logs'));
       const logsByDate = new Map();
       (logs || []).forEach(log => logsByDate.set(log.date, log));
 
@@ -45,7 +48,7 @@ export class Calendar {
     let partialCount = 0;
     let emptyCount = 0;
 
-    for (let d = 1; d <= 21; d++) {
+    for (let d = 1; d <= TOTAL_DAYS; d++) {
       const dateStr = this._getDateForDay(d);
       const log = logsMap.get(dateStr);
       if (!log) {
@@ -76,8 +79,10 @@ export class Calendar {
 
       <!-- Month grids -->
       <div class="grid-2 gap-8">
-        ${this._renderMonthGrid('October 2026', 2026, 9, 31, logsMap, today)}
-        ${this._renderMonthGrid('November 2026', 2026, 10, 30, logsMap, today)}
+        ${this._challengeMonths().map(({ year, monthIdx }) => this._renderMonthGrid(
+          new Date(year, monthIdx, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
+          year, monthIdx, new Date(year, monthIdx + 1, 0).getDate(), logsMap, today
+        )).join('')}
       </div>
 
       <!-- Legend -->
@@ -101,6 +106,7 @@ export class Calendar {
     content.querySelectorAll('.calendar-day[data-date]').forEach(card => {
       card.addEventListener('click', () => {
         const date = card.dataset.date;
+        if (date < CHALLENGE_START || date > CHALLENGE_END) return;
         window.location.hash = `#daily-log?date=${date}`;
       });
     });
@@ -164,8 +170,19 @@ export class Calendar {
   }
 
   _getDateForDay(cDay) {
-    const start = new Date(CHALLENGE_START);
-    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + (cDay - 1));
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    return addDays(CHALLENGE_START, cDay - 1);
+  }
+
+  /** Every { year, monthIdx } from the challenge's start month to its end month. */
+  _challengeMonths() {
+    const [sy, sm] = CHALLENGE_START.split('-').map(Number);
+    const [ey, em] = CHALLENGE_END.split('-').map(Number);
+    const months = [];
+    let y = sy, m = sm - 1;
+    while (y < ey || (y === ey && m <= em - 1)) {
+      months.push({ year: y, monthIdx: m });
+      if (++m > 11) { m = 0; y++; }
+    }
+    return months;
   }
 }

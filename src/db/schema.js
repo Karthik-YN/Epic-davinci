@@ -11,6 +11,11 @@
  * @param {import('better-sqlite3').Database} db
  */
 function initDb(db) {
+  // Remember whether the challenges table is new, so the legacy challenge is seeded only once
+  const hadChallengesTable = !!db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'challenges'")
+    .get();
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS daily_logs (
       id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,6 +36,9 @@ function initDb(db) {
       -- Nutrition
       calories_kcal           REAL,
       protein_g               REAL,
+      carbs_g                 REAL,
+      fat_g                   REAL,
+      fiber_g                 REAL,
       water_l                 REAL,
       fruits_veggies          INTEGER,
       junk_food               INTEGER,
@@ -109,15 +117,86 @@ function initDb(db) {
       waist_start_date TEXT,
       waist_end_cm    REAL,
       waist_end_date  TEXT,
+
+      -- Daily nutrition targets
+      calorie_target_kcal REAL DEFAULT 2200,
+      protein_target_g    REAL DEFAULT 140,
+      carbs_target_g      REAL DEFAULT 220,
+      fat_target_g        REAL DEFAULT 70,
+      fiber_target_g      REAL DEFAULT 30,
+      water_target_l      REAL DEFAULT 3.5,
+
       updated_at      TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS challenges (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL,
+      start_date  TEXT NOT NULL,
+      end_date    TEXT NOT NULL,
+      priority    TEXT NOT NULL DEFAULT 'medium',
+      description TEXT,
+      budget_inr  REAL,
+      created_at  TEXT,
+      updated_at  TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS challenge_notes (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      challenge_id  INTEGER NOT NULL REFERENCES challenges(id) ON DELETE CASCADE,
+      category      TEXT NOT NULL DEFAULT 'note',
+      content       TEXT NOT NULL,
+      done          INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT,
+      updated_at    TEXT
+    );
   `);
+
+  // Add columns introduced after the first release to existing databases
+  addMissingColumns(db, 'daily_logs', {
+    carbs_g: 'REAL',
+    fat_g:   'REAL',
+    fiber_g: 'REAL',
+  });
+  addMissingColumns(db, 'challenge_settings', {
+    calorie_target_kcal: 'REAL DEFAULT 2200',
+    protein_target_g:    'REAL DEFAULT 140',
+    carbs_target_g:      'REAL DEFAULT 220',
+    fat_target_g:        'REAL DEFAULT 70',
+    fiber_target_g:      'REAL DEFAULT 30',
+    water_target_l:      'REAL DEFAULT 3.5',
+  });
 
   // Seed default settings row (id=1) if it doesn't exist yet
   db.prepare(`
     INSERT OR IGNORE INTO challenge_settings (id, start_date, end_date, review_date, budget_inr, weight_min, weight_max)
     VALUES (1, '2026-10-12', '2026-11-01', '2026-11-02', 1500, 30, 200)
   `).run();
+
+  // Carry the original 21-day challenge over as the first challenge in the list
+  if (!hadChallengesTable) {
+    const settings = db.prepare('SELECT start_date, end_date FROM challenge_settings WHERE id = 1').get();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO challenges (name, start_date, end_date, priority, created_at, updated_at)
+      VALUES ('21-Day Challenge', @start, @end, 'high', @now, @now)
+    `).run({ start: settings.start_date, end: settings.end_date, now });
+  }
+}
+
+/**
+ * ALTER TABLE ADD COLUMN for every column in `columns` the table doesn't have yet.
+ * @param {import('better-sqlite3').Database} db
+ * @param {string} table
+ * @param {Object<string, string>} columns  name → type definition
+ */
+function addMissingColumns(db, table, columns) {
+  const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name));
+  for (const [name, type] of Object.entries(columns)) {
+    if (!existing.has(name)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    }
+  }
 }
 
 module.exports = { initDb };

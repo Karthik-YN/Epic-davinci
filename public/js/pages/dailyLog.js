@@ -24,6 +24,8 @@ import {
   isValidChallengeDate,
   CHALLENGE_START,
   CHALLENGE_END,
+  TOTAL_DAYS,
+  withChallenge,
   calculateSleepHours,
   debounce,
   formatDuration,
@@ -31,10 +33,22 @@ import {
   setSaveStatus,
 } from '../utils.js';
 
+// Daily nutrition targets (from Settings) shown against what was logged.
+// `limit: true` means going over the target is a warning rather than a win.
+const NUTRITION_TARGETS = [
+  { field: 'calories_kcal', target: 'calorie_target_kcal', label: 'Calories', unit: 'kcal', icon: '🔥', limit: true },
+  { field: 'protein_g',     target: 'protein_target_g',    label: 'Protein',  unit: 'g',    icon: '🥩' },
+  { field: 'carbs_g',       target: 'carbs_target_g',      label: 'Carbs',    unit: 'g',    icon: '🍚', limit: true },
+  { field: 'fat_g',         target: 'fat_target_g',        label: 'Fat',      unit: 'g',    icon: '🥑', limit: true },
+  { field: 'fiber_g',       target: 'fiber_target_g',      label: 'Fiber',    unit: 'g',    icon: '🥦' },
+  { field: 'water_l',       target: 'water_target_l',      label: 'Water',    unit: 'L',    icon: '💧' },
+];
+
 export class DailyLog {
   constructor() {
     this.currentDate = null;
     this.formData = {};
+    this.targets = {};
     this._isDirty = false;
     this._debouncedSave = debounce(() => this.save(), 1500);
   }
@@ -65,7 +79,7 @@ export class DailyLog {
           <div>
             <div class="flex items-center gap-3">
               <h1 class="page-title mb-0" id="log-date-display">${formatDate(this.currentDate)}</h1>
-              <span class="badge badge-accent" id="log-day-badge">Day ${getChallengeDay(this.currentDate) || '?'} of 21</span>
+              <span class="badge badge-accent" id="log-day-badge">Day ${getChallengeDay(this.currentDate) || '?'} of ${TOTAL_DAYS}</span>
             </div>
             <p class="page-subtitle text-muted mt-1" id="log-date-status"></p>
           </div>
@@ -97,6 +111,9 @@ export class DailyLog {
     // 3. Bind navigation controls
     this._bindHeaderEvents(container);
 
+    // Nutrition targets are app-wide settings; a failure just hides the comparison
+    this.targets = await api.get('/api/settings').catch(() => ({}));
+
     // 4. Fetch data for selected date
     await this._loadDateData();
   }
@@ -126,7 +143,7 @@ export class DailyLog {
       if (isValidChallengeDate(dateVal)) {
         window.location.hash = `#daily-log?date=${dateVal}`;
       } else {
-        showToast('Selected date is outside the 21-day challenge window', 'warning');
+        showToast(`Selected date is outside this ${TOTAL_DAYS}-day challenge window`, 'warning');
         e.target.value = this.currentDate;
       }
     });
@@ -313,9 +330,12 @@ export class DailyLog {
   _renderNutritionSection() {
     const d = this.formData;
     const content = `
+      <div class="nutrition-targets mb-4" id="nutrition-targets">
+        ${this._renderNutritionTargets()}
+      </div>
       <div class="grid-2 gap-4">
         <div class="form-group">
-          <label for="calories_kcal">Total Calories Consumed (kcal)</label>
+          <label for="calories_kcal">Total Calories Consumed (kcal) ${this._targetHint('calorie_target_kcal', 'kcal')}</label>
           <div class="input-with-unit">
             <input type="number" id="calories_kcal" name="calories_kcal" value="${d.calories_kcal ?? ''}" placeholder="e.g. 2200" min="0">
             <span class="unit">kcal</span>
@@ -323,7 +343,7 @@ export class DailyLog {
         </div>
 
         <div class="form-group">
-          <label for="protein_g">Total Protein Consumed (g)</label>
+          <label for="protein_g">Total Protein Consumed (g) ${this._targetHint('protein_target_g', 'g')}</label>
           <div class="input-with-unit">
             <input type="number" step="0.1" id="protein_g" name="protein_g" value="${d.protein_g ?? ''}" placeholder="e.g. 140" min="0">
             <span class="unit">g</span>
@@ -331,7 +351,31 @@ export class DailyLog {
         </div>
 
         <div class="form-group">
-          <label for="water_l">Total Water Intake (L)</label>
+          <label for="carbs_g">Total Carbs Consumed (g) ${this._targetHint('carbs_target_g', 'g')}</label>
+          <div class="input-with-unit">
+            <input type="number" step="0.1" id="carbs_g" name="carbs_g" value="${d.carbs_g ?? ''}" placeholder="e.g. 220" min="0">
+            <span class="unit">g</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="fat_g">Total Fat Consumed (g) ${this._targetHint('fat_target_g', 'g')}</label>
+          <div class="input-with-unit">
+            <input type="number" step="0.1" id="fat_g" name="fat_g" value="${d.fat_g ?? ''}" placeholder="e.g. 70" min="0">
+            <span class="unit">g</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="fiber_g">Total Fiber Consumed (g) ${this._targetHint('fiber_target_g', 'g')}</label>
+          <div class="input-with-unit">
+            <input type="number" step="0.1" id="fiber_g" name="fiber_g" value="${d.fiber_g ?? ''}" placeholder="e.g. 30" min="0">
+            <span class="unit">g</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="water_l">Total Water Intake (L) ${this._targetHint('water_target_l', 'L')}</label>
           <div class="input-with-unit">
             <input type="number" step="0.1" id="water_l" name="water_l" value="${d.water_l ?? ''}" placeholder="e.g. 3.5" min="0">
             <span class="unit">L</span>
@@ -365,6 +409,61 @@ export class DailyLog {
       </div>
     `;
     return this._renderSectionCard('nutrition', '2. Nutrition & Hydration', '🥗', content);
+  }
+
+  _targetHint(targetKey, unit) {
+    const t = this.targets?.[targetKey];
+    return t != null ? `<span class="target-hint">Target ${t} ${unit}</span>` : '';
+  }
+
+  /** Progress tiles: logged value vs the daily target from Settings. */
+  _renderNutritionTargets() {
+    const d = this.formData;
+    const tiles = NUTRITION_TARGETS.map(({ field, target, label, unit, icon, limit }) => {
+      const goal  = this.targets?.[target];
+      const value = d[field];
+      if (goal == null) return '';
+
+      const pct = goal > 0 && value != null ? Math.round((value / goal) * 100) : 0;
+      let state = 'pending';
+      let note  = 'Not logged yet';
+      if (value != null) {
+        const diff = Math.round((goal - value) * 10) / 10;
+        if (limit) {
+          state = pct > 110 ? 'over' : pct >= 90 ? 'hit' : 'under';
+          note  = diff >= 0 ? `${diff} ${unit} left` : `${Math.abs(diff)} ${unit} over`;
+        } else {
+          state = pct >= 100 ? 'hit' : 'under';
+          note  = diff > 0 ? `${diff} ${unit} to go` : 'Target reached 🎉';
+        }
+      }
+
+      return `
+        <div class="target-tile target-${state}" data-target-field="${field}">
+          <div class="target-tile-head">
+            <span>${icon} ${label}</span>
+            <span class="target-tile-pct">${value != null ? pct + '%' : '—'}</span>
+          </div>
+          <div class="target-tile-value">${value ?? 0} <span class="text-muted">/ ${goal} ${unit}</span></div>
+          <div class="progress-bar"><div class="progress-bar-fill" style="width:${Math.min(100, pct)}%"></div></div>
+          <div class="target-tile-note">${note}</div>
+        </div>
+      `;
+    }).join('');
+
+    if (!tiles.trim()) return '';
+    return `
+      <div class="flex justify-between items-center mb-2">
+        <span class="text-sm font-semibold">Today vs your daily targets</span>
+        <a href="#settings" class="text-xs">Edit targets</a>
+      </div>
+      <div class="target-grid">${tiles}</div>
+    `;
+  }
+
+  _refreshNutritionTargets() {
+    const el = document.getElementById('nutrition-targets');
+    if (el) el.innerHTML = this._renderNutritionTargets();
   }
 
   // 3. Sleep
@@ -728,11 +827,12 @@ export class DailyLog {
       input.addEventListener('input', () => {
         this._updateFormValue(input);
         this._markDirty();
+        if (NUTRITION_TARGETS.some(t => t.field === input.name)) this._refreshNutritionTargets();
       });
 
       input.addEventListener('change', () => {
+        // 'input' already marked the form dirty; saving here only flushes pending edits
         this._updateFormValue(input);
-        this._markDirty();
         this.save(); // Immediate save on change
       });
     });
@@ -815,7 +915,7 @@ export class DailyLog {
     if (!box) return;
 
     try {
-      const stats = await api.get('/api/stats/spending');
+      const stats = await api.get(withChallenge('/api/stats/spending'));
       const totalSpent = stats.totalSpent || 0;
       const budget = stats.budget || 1500;
       const remaining = stats.remaining;

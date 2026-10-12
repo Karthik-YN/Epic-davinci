@@ -17,6 +17,12 @@ const NUMERIC_SETTINGS = [
   'weight_max',
   'waist_start_cm',
   'waist_end_cm',
+  'calorie_target_kcal',
+  'protein_target_g',
+  'carbs_target_g',
+  'fat_target_g',
+  'fiber_target_g',
+  'water_target_l',
 ];
 
 // ---------------------------------------------------------------------------
@@ -65,6 +71,12 @@ router.put('/', (req, res) => {
     'waist_start_date',
     'waist_end_cm',
     'waist_end_date',
+    'calorie_target_kcal',
+    'protein_target_g',
+    'carbs_target_g',
+    'fat_target_g',
+    'fiber_target_g',
+    'water_target_l',
   ];
 
   for (const field of ALLOWED_FIELDS) {

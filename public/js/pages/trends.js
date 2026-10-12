@@ -3,7 +3,7 @@
  * SVG line charts for key metrics + habit completion rates summary table.
  */
 
-import { api, formatDateShort, formatCurrency } from '../utils.js';
+import { api, formatDateShort, formatCurrency, withChallenge, TOTAL_DAYS } from '../utils.js';
 
 export class Trends {
   async render(container) {
@@ -11,7 +11,7 @@ export class Trends {
       <div class="trends-page">
         <header class="page-header mb-6">
           <h1 class="page-title">Progress & Trends</h1>
-          <p class="page-subtitle text-muted">21-Day challenge visual history and habit compliance</p>
+          <p class="page-subtitle text-muted">${TOTAL_DAYS}-day challenge visual history and habit compliance</p>
         </header>
 
         <div id="trends-content" class="flex flex-col gap-8">
@@ -22,8 +22,8 @@ export class Trends {
 
     try {
       const [trends, habits] = await Promise.all([
-        api.get('/api/stats/trends'),
-        api.get('/api/stats/habits'),
+        api.get(withChallenge('/api/stats/trends')),
+        api.get(withChallenge('/api/stats/habits')),
       ]);
 
       this._renderTrends(container, trends, habits);
@@ -42,13 +42,14 @@ export class Trends {
     content.innerHTML = `
       <!-- Metric Charts Grid -->
       <div class="grid-2 gap-6">
-        ${this._renderChartCard('Body Weight', 'kg', trends.weights, '#2d6a4f')}
-        ${this._renderChartCard('Daily Steps', 'steps', trends.steps, '#1e40af')}
+        ${this._renderChartCard('Body Weight', 'kg', trends.weights, '#7c3aed')}
+        ${this._renderChartCard('Daily Steps', 'steps', trends.steps, '#2563eb')}
         ${this._renderChartCard('Daily Protein Intake', 'g', trends.protein, '#b45309')}
-        ${this._renderChartCard('Daily Water Intake', 'L', trends.water, '#0284c7')}
-        ${this._renderChartCard('Sleep Duration', 'hours', trends.sleep, '#7c3aed')}
+        ${this._renderChartCard('Daily Calories', 'kcal', trends.calories, '#ea580c')}
+        ${this._renderChartCard('Daily Water Intake', 'L', trends.water, '#0891b2')}
+        ${this._renderChartCard('Sleep Duration', 'hours', trends.sleep, '#4f46e5')}
         ${this._renderChartCard('AI/ML Study Time', 'hours', trends.studyHours, '#d97706')}
-        ${this._renderChartCard('Daily Spending', '₹', trends.spending, '#dc2626')}
+        ${this._renderChartCard('Daily Spending', '₹', trends.spending, '#db2777')}
       </div>
 
       <!-- Habit Compliance Summary Table -->

@@ -1,10 +1,13 @@
 /**
- * finalReview.js — November 2 Challenge Final Review Page
+ * finalReview.js — Challenge Final Review Page
  * Displays exact beginning/ending measurements, calculated averages across valid days,
  * total gym/cardio sessions, study hours, spending summary, and objective summary.
  */
 
-import { api, formatDate, formatCurrency, formatDuration } from '../utils.js';
+import {
+  api, formatDate, formatCurrency, formatDuration, withChallenge, escapeHtml,
+  getActiveChallenge, CHALLENGE_START, CHALLENGE_END, REVIEW_DATE, TOTAL_DAYS,
+} from '../utils.js';
 
 export class FinalReview {
   async render(container) {
@@ -14,8 +17,8 @@ export class FinalReview {
           <div class="flex items-center gap-3">
             <span class="text-3xl">🏆</span>
             <div>
-              <h1 class="page-title mb-0">21-Day Challenge Final Review</h1>
-              <p class="page-subtitle text-muted">November 2, 2026 — Comprehensive Performance Summary</p>
+              <h1 class="page-title mb-0">${escapeHtml(getActiveChallenge()?.name || `${TOTAL_DAYS}-Day Challenge`)} — Final Review</h1>
+              <p class="page-subtitle text-muted">${formatDate(REVIEW_DATE)} — Comprehensive Performance Summary</p>
             </div>
           </div>
         </header>
@@ -27,8 +30,8 @@ export class FinalReview {
     `;
 
     try {
-      const review = await api.get('/api/stats/final-review');
-      const habits = await api.get('/api/stats/habits');
+      const review = await api.get(withChallenge('/api/stats/final-review'));
+      const habits = await api.get(withChallenge('/api/stats/habits'));
 
       this._renderReview(container, review, habits);
     } catch (err) {
@@ -48,6 +51,11 @@ export class FinalReview {
       ? `${review.weightChange > 0 ? '+' : ''}${review.weightChange.toFixed(1)} kg`
       : 'N/A';
 
+    // Averages arrive as { value, count }
+    const avgSteps   = review.avgSteps?.value ?? null;
+    const avgProtein = review.avgProtein?.value ?? null;
+    const avgSleep   = review.avgSleep?.value ?? null;
+
     const waistChangeStr = review.waistChange != null
       ? `${review.waistChange > 0 ? '+' : ''}${review.waistChange.toFixed(1)} cm`
       : 'N/A';
@@ -58,11 +66,11 @@ export class FinalReview {
         <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <span class="badge badge-accent mb-2">Challenge Status</span>
-            <h2 class="text-2xl font-bold text-accent mb-1">${review.daysLogged} of 21 Days Logged</h2>
+            <h2 class="text-2xl font-bold text-accent mb-1">${review.daysLogged} of ${TOTAL_DAYS} Days Logged</h2>
             <p class="text-sm text-muted">
-              ${review.daysLogged === 21
-                ? 'Perfect record! All 21 challenge days were logged.'
-                : `${21 - review.daysLogged} days have missing or partial records.`}
+              ${review.daysLogged === TOTAL_DAYS
+                ? `Perfect record! All ${TOTAL_DAYS} challenge days were logged.`
+                : `${TOTAL_DAYS - review.daysLogged} days have missing or partial records.`}
             </p>
           </div>
           <a href="/api/export/json" download="davinci-challenge-export.json" class="btn btn-primary">
@@ -74,15 +82,15 @@ export class FinalReview {
       <!-- Section 1: Body Measurements -->
       <div class="card p-6">
         <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
-          <span>📏</span> Body Measurements (Day 1 vs Day 21)
+          <span>📏</span> Body Measurements (Day 1 vs Day ${TOTAL_DAYS})
         </h2>
         <div class="table-responsive">
           <table class="data-table">
             <thead>
               <tr>
                 <th>Metric</th>
-                <th>Day 1 (Oct 12, 2026)</th>
-                <th>Day 21 (Nov 1, 2026)</th>
+                <th>Day 1 (${formatDate(CHALLENGE_START)})</th>
+                <th>Day ${TOTAL_DAYS} (${formatDate(CHALLENGE_END)})</th>
                 <th>Change</th>
               </tr>
             </thead>
@@ -126,7 +134,7 @@ export class FinalReview {
             </div>
             <div class="flex justify-between items-center border-b pb-2">
               <span class="text-muted">Average Daily Steps:</span>
-              <span class="font-bold text-lg">${review.avgSteps != null ? Math.round(review.avgSteps).toLocaleString() : 'N/A'} steps/day</span>
+              <span class="font-bold text-lg">${avgSteps != null ? Math.round(avgSteps).toLocaleString() : 'N/A'} steps/day</span>
             </div>
             <div class="text-xs text-muted">
               * Gym sessions exclude Rest and Recovery days unless a workout note was added.
@@ -141,11 +149,11 @@ export class FinalReview {
           <div class="flex flex-col gap-4">
             <div class="flex justify-between items-center border-b pb-2">
               <span class="text-muted">Average Daily Protein:</span>
-              <span class="font-bold text-lg">${review.avgProtein != null ? `${review.avgProtein.toFixed(1)} g/day` : 'N/A'}</span>
+              <span class="font-bold text-lg">${avgProtein != null ? `${avgProtein.toFixed(1)} g/day` : 'N/A'}</span>
             </div>
             <div class="flex justify-between items-center border-b pb-2">
               <span class="text-muted">Average Sleep Duration:</span>
-              <span class="font-bold text-lg">${review.avgSleep != null ? formatDuration(review.avgSleep * 60) : 'N/A'} / night</span>
+              <span class="font-bold text-lg">${avgSleep != null ? formatDuration(avgSleep * 60) : 'N/A'} / night</span>
             </div>
             <div class="flex justify-between items-center border-b pb-2">
               <span class="text-muted">Total AI/ML Study Hours:</span>
@@ -170,7 +178,7 @@ export class FinalReview {
           </div>
           <div class="p-4 bg-surface-2 rounded-md text-center">
             <div class="text-xs text-muted">Challenge Budget</div>
-            <div class="text-xl font-bold mt-1">${formatCurrency(s.budget_inr || 1500)}</div>
+            <div class="text-xl font-bold mt-1">${formatCurrency(review.budget ?? s.budget_inr ?? 1500)}</div>
           </div>
           <div class="p-4 bg-surface-2 rounded-md text-center">
             <div class="text-xs text-muted">Remaining Balance</div>

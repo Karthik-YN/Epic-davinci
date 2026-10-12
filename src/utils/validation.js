@@ -40,6 +40,9 @@ const BINARY_FIELDS = [
 const NON_NEGATIVE_FIELDS = [
   'calories_kcal',
   'protein_g',
+  'carbs_g',
+  'fat_g',
+  'fiber_g',
   'water_l',
   'cardio_duration_min',
   'plank_duration_sec',
@@ -54,15 +57,17 @@ const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 /**
  * Validates a daily log request body.
  * @param {Object} body
+ * @param {Object} [options]
+ * @param {(date: string) => boolean} [options.isValidDate] date check, defaults to the original 21-day window
  * @returns {{ valid: boolean, errors: Object }}
  */
-function validateDailyLog(body) {
+function validateDailyLog(body, { isValidDate = isValidChallengeDate } = {}) {
   const errors = {};
 
   // --- date ---
   if (body.date !== undefined) {
-    if (!isValidChallengeDate(body.date)) {
-      errors.date = 'Must be a valid YYYY-MM-DD date within the challenge window (2026-10-12 to 2026-11-01)';
+    if (!isValidDate(body.date)) {
+      errors.date = 'Must be a valid YYYY-MM-DD date within a challenge window';
     }
   }
 

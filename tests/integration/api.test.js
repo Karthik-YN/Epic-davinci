@@ -363,6 +363,192 @@ describe('PUT /api/settings', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Challenges
+// ---------------------------------------------------------------------------
+describe('Challenges API', () => {
+  let weekId;
+
+  test('original 21-day challenge is seeded', async () => {
+    const res = await request(app).get('/api/challenges');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0]).toMatchObject({
+      name: '21-Day Challenge',
+      start_date: '2026-10-12',
+      end_date: '2026-11-01',
+      total_days: 21,
+      priority: 'high',
+    });
+  });
+
+  test('creates a 7-day challenge', async () => {
+    const res = await request(app).post('/api/challenges').send({
+      name: '7-Day Reset',
+      start_date: '2026-12-01',
+      end_date: '2026-12-07',
+      priority: 'low',
+      budget_inr: 500,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.total_days).toBe(7);
+    expect(res.body.priority).toBe('low');
+    weekId = res.body.id;
+  });
+
+  test('rejects end before start, bad priority and missing name', async () => {
+    const res = await request(app).post('/api/challenges').send({
+      name: '',
+      start_date: '2026-12-10',
+      end_date: '2026-12-01',
+      priority: 'urgent',
+    });
+    expect(res.status).toBe(400);
+    expect(Object.keys(res.body.errors).sort()).toEqual(['end_date', 'name', 'priority']);
+  });
+
+  test('rejects impossible dates', async () => {
+    const res = await request(app).post('/api/challenges').send({
+      name: 'Bad', start_date: '2026-02-30', end_date: '2026-03-05',
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.errors).toHaveProperty('start_date');
+  });
+
+  test('logs are accepted inside the new challenge window', async () => {
+    const res = await request(app).post('/api/logs/2026-12-03').send({ weight_kg: 70, extra_spent_inr: 120 });
+    expect(res.status).toBe(200);
+  });
+
+  test('logs are still rejected outside every challenge', async () => {
+    const res = await request(app).post('/api/logs/2026-12-20').send({ weight_kg: 70 });
+    expect(res.status).toBe(400);
+  });
+
+  test('stats are scoped to the challenge', async () => {
+    const overview = await request(app).get(`/api/stats/overview?challengeId=${weekId}`);
+    expect(overview.body.totalDays).toBe(7);
+    expect(overview.body.daysWithData).toEqual(['2026-12-03']);
+
+    const spending = await request(app).get(`/api/stats/spending?challengeId=${weekId}`);
+    expect(spending.body.totalSpent).toBe(120);
+    expect(spending.body.budget).toBe(500);
+
+    const review = await request(app).get(`/api/stats/final-review?challengeId=${weekId}`);
+    expect(review.body.daysLogged).toBe(1);
+    expect(review.body.totalDays).toBe(7);
+
+    const logs = await request(app).get(`/api/logs?challengeId=${weekId}`);
+    expect(logs.body.map(l => l.date)).toEqual(['2026-12-03']);
+  });
+
+  test('default stats still cover the original window', async () => {
+    const overview = await request(app).get('/api/stats/overview');
+    expect(overview.body.daysWithData).not.toContain('2026-12-03');
+  });
+
+  test('unknown challengeId → 404', async () => {
+    const res = await request(app).get('/api/stats/overview?challengeId=9999');
+    expect(res.status).toBe(404);
+  });
+
+  test('updates dates and priority', async () => {
+    const res = await request(app).put(`/api/challenges/${weekId}`).send({ end_date: '2026-12-21', priority: 'high' });
+    expect(res.status).toBe(200);
+    expect(res.body.total_days).toBe(21);
+    expect(res.body.priority).toBe('high');
+    expect(res.body.name).toBe('7-Day Reset');
+  });
+
+  describe('notes', () => {
+    let noteId;
+
+    test('adds a note', async () => {
+      const res = await request(app)
+        .post(`/api/challenges/${weekId}/notes`)
+        .send({ category: 'priority', content: '  Sleep by 11pm  ' });
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ category: 'priority', content: 'Sleep by 11pm', done: 0 });
+      noteId = res.body.id;
+    });
+
+    test('rejects empty content and unknown category', async () => {
+      const res = await request(app)
+        .post(`/api/challenges/${weekId}/notes`)
+        .send({ category: 'random', content: ' ' });
+      expect(res.status).toBe(400);
+      expect(res.body.errors).toHaveProperty('content');
+      expect(res.body.errors).toHaveProperty('category');
+    });
+
+    test('marks a note done and lists it', async () => {
+      const upd = await request(app).put(`/api/challenges/${weekId}/notes/${noteId}`).send({ done: 1 });
+      expect(upd.body.done).toBe(1);
+      const list = await request(app).get(`/api/challenges/${weekId}/notes`);
+      expect(list.body).toHaveLength(1);
+      const all = await request(app).get('/api/challenges');
+      expect(all.body.find(c => c.id === weekId).notes_count).toBe(1);
+    });
+
+    test('deletes a note', async () => {
+      const res = await request(app).delete(`/api/challenges/${weekId}/notes/${noteId}`);
+      expect(res.status).toBe(200);
+      const again = await request(app).delete(`/api/challenges/${weekId}/notes/${noteId}`);
+      expect(again.status).toBe(404);
+    });
+  });
+
+  test('deleting a challenge keeps its daily logs', async () => {
+    await request(app).post(`/api/challenges/${weekId}/notes`).send({ content: 'temp' });
+    const res = await request(app).delete(`/api/challenges/${weekId}`);
+    expect(res.status).toBe(200);
+    expect((await request(app).get(`/api/challenges/${weekId}`)).status).toBe(404);
+    expect((await request(app).get('/api/logs/2026-12-03')).status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nutrition targets & macros
+// ---------------------------------------------------------------------------
+describe('Nutrition targets', () => {
+  test('settings have default targets', async () => {
+    const res = await request(app).get('/api/settings');
+    expect(res.body).toMatchObject({
+      calorie_target_kcal: 2200,
+      protein_target_g: 140,
+      carbs_target_g: 220,
+      fat_target_g: 70,
+      fiber_target_g: 30,
+      water_target_l: 3.5,
+    });
+  });
+
+  test('targets can be updated', async () => {
+    const res = await request(app).put('/api/settings').send({ calorie_target_kcal: 1900, protein_target_g: 160 });
+    expect(res.status).toBe(200);
+    expect(res.body.calorie_target_kcal).toBe(1900);
+    expect(res.body.protein_target_g).toBe(160);
+  });
+
+  test('negative target fails', async () => {
+    const res = await request(app).put('/api/settings').send({ fat_target_g: -5 });
+    expect(res.status).toBe(400);
+    expect(res.body.errors).toHaveProperty('fat_target_g');
+  });
+
+  test('daily log stores carbs, fat and fiber', async () => {
+    const res = await request(app).post('/api/logs/2026-10-20').send({ carbs_g: 200, fat_g: 60.5, fiber_g: 25 });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ carbs_g: 200, fat_g: 60.5, fiber_g: 25 });
+  });
+
+  test('negative macros fail validation', async () => {
+    const res = await request(app).post('/api/logs/2026-10-20').send({ carbs_g: -1 });
+    expect(res.status).toBe(400);
+    expect(res.body.errors).toHaveProperty('carbs_g');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Cleanup: close DB after all tests
 // ---------------------------------------------------------------------------
 afterAll(() => {

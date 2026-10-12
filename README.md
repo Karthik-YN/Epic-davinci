@@ -1,4 +1,4 @@
-# Epic Davinci — 21-Day Health & Lifestyle Tracker
+# Epic Davinci — Health & Lifestyle Challenge Tracker
 
 A personal, production-quality web application to track your 21-day health challenge.
 
@@ -59,7 +59,7 @@ When your phone and laptop are on the **same Wi-Fi network**:
 
 ### 10 Tracked Life Aspects
 1. **Fitness** — weight, workouts, cardio, steps, plank
-2. **Nutrition & Hydration** — calories, protein, water, meal planning
+2. **Nutrition & Hydration** — calories, protein, carbs, fat, fiber, water vs your daily targets, meal planning
 3. **Sleep** — bedtime, wake time, auto-calculated duration (midnight-aware)
 4. **Career (AI/ML & DSA)** — topics, practical work, study hours
 5. **Oral, Skin & Hair Care** — brushing, skincare, hair care (with "not scheduled" state)
@@ -73,13 +73,25 @@ When your phone and laptop are on the **same Wi-Fi network**:
 - **Daily Reflection** — best thing, obstacles, improvements
 - **Daily Planning** — tomorrow's top 3 priorities
 
+### Your Own Challenges
+- **Challenges (landing page)** — create as many challenges as you like: pick a start date and a
+  duration (3, 7, 14, 21, 30… days or any custom end date), a priority (High / Medium / Low), an
+  optional goal and an optional budget. Then pick one from the list to step inside.
+- **Priorities & Notes** — each challenge has its own priorities, important notes and reminders,
+  shown in the sidebar on every page (the "📌 Notes" button on mobile). Tick them off as you go.
+- **Nutrition targets** — set daily calorie, protein, carbs, fat, fiber and water targets in
+  Settings; the Daily Log shows what you've logged against each target.
+- Days that fall inside two overlapping challenges share the same daily log.
+- The original Oct 12 – Nov 1, 2026 challenge is carried over automatically as the first challenge.
+
 ### Application Sections
+- **Challenges** — create, edit, delete and choose challenges
 - **Dashboard** — today's overview, progress, key metrics
-- **Daily Log** — full data entry for any challenge date
-- **Calendar** — visual overview of all 21 days
-- **Trends** — charts for weight, steps, protein, water, sleep, study
-- **Final Review** — November 2 summary with all statistics
-- **Settings** — waist measurements, budget, export/backup
+- **Daily Log** — full data entry for any date in the selected challenge
+- **Calendar** — visual overview of every day in the challenge
+- **Trends** — charts for weight, steps, calories, protein, water, sleep, study, spending
+- **Final Review** — end-of-challenge summary with all statistics
+- **Settings** — nutrition targets, waist measurements, budget, export/backup
 
 ---
 

@@ -16,6 +16,8 @@ const db      = require('../db/database');
 router.get('/json', (req, res) => {
   const logs     = db.prepare('SELECT * FROM daily_logs ORDER BY date ASC').all();
   const settings = db.prepare('SELECT * FROM challenge_settings WHERE id = 1').get();
+  const challenges = db.prepare('SELECT * FROM challenges ORDER BY start_date ASC').all();
+  const notes      = db.prepare('SELECT * FROM challenge_notes ORDER BY challenge_id ASC, id ASC').all();
 
   const payload = {
     version: '1.0.0',
@@ -26,6 +28,8 @@ router.get('/json', (req, res) => {
       reviewDate: '2026-11-02',
     },
     settings: settings || null,
+    challenges,
+    notes,
     totalLogs: logs.length,
     logs,
   };
@@ -48,7 +52,7 @@ router.get('/csv', (req, res) => {
       'id', 'date', 'created_at', 'updated_at',
       'weight_kg', 'workout_type', 'workout_notes', 'cardio_completed',
       'cardio_duration_min', 'total_steps', 'plank_completed', 'plank_duration_sec',
-      'calories_kcal', 'protein_g', 'water_l', 'fruits_veggies', 'junk_food',
+      'calories_kcal', 'protein_g', 'carbs_g', 'fat_g', 'fiber_g', 'water_l', 'fruits_veggies', 'junk_food',
       'within_calorie_target', 'planned_meals_tomorrow', 'nutrition_notes',
       'bedtime', 'wake_time', 'sleep_duration_min', 'sleep_manual_override',
       'career_topic', 'career_practical', 'career_dsa', 'career_learned', 'career_study_min',
