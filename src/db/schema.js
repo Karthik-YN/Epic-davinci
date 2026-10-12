@@ -6,6 +6,8 @@
  * All tables are created with IF NOT EXISTS to be safe on re-runs.
  */
 
+const crypto = require('crypto');
+
 /**
  * Run all CREATE TABLE IF NOT EXISTS statements and seed default settings.
  * @param {typeof import('./database')} db
@@ -150,7 +152,19 @@ async function initDb(db) {
       created_at    TEXT,
       updated_at    TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS app_meta (
+      key   TEXT PRIMARY KEY,
+      value TEXT
+    );
   `);
+
+  // A random id for this copy of the database. When the host wipes its disk (Render free tier),
+  // the new database gets a new id, which tells browsers to restore their saved copy.
+  await db.run(
+    "INSERT OR IGNORE INTO app_meta (key, value) VALUES ('instance_id', @id)",
+    { id: crypto.randomUUID() }
+  );
 
   // Add columns introduced after the first release to existing databases
   await addMissingColumns(db, 'daily_logs', {

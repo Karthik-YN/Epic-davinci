@@ -15,6 +15,7 @@ import {
   api, showToast, getActiveChallenge, setActiveChallenge, getStoredChallengeId,
 } from './utils.js';
 import { initSidebar }  from './sidebar.js';
+import { syncBackup, scheduleBackup } from './localBackup.js';
 
 // ─── Page Registry ──────────────────────────────────────────────
 const PAGES = {
@@ -215,12 +216,30 @@ function _setupGlobalErrorHandling() {
   });
 }
 
+// ─── Browser Backup ──────────────────────────────────────────────
+function _setupBackup() {
+  window.addEventListener('data-changed', scheduleBackup);
+
+  // Coming back to an open tab: the server may have slept and lost its data meanwhile
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible') return;
+    if (await syncBackup()) {
+      showToast('Restored your data saved on this device', 'success', 4000);
+      navigate(currentPageKey || DEFAULT_PAGE);
+    }
+  });
+}
+
 // ─── Bootstrap ───────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
   _setupNav();
   _setupHashChange();
   _setupGlobalErrorHandling();
   initSidebar();
+  _setupBackup();
+
+  // If the server lost its data (Render free tier wipes it), put this browser's copy back first
+  if (await syncBackup()) showToast('Restored your data saved on this device', 'success', 4000);
 
   // Restore the last selected challenge so the sidebar shows it on any page
   await _ensureActiveChallenge();

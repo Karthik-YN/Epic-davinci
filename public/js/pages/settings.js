@@ -194,15 +194,15 @@ export class Settings {
         </div>
 
         <div class="border-t pt-4">
-          <h3 class="font-bold text-sm mb-2">Local Storage Location & Backup:</h3>
+          <h3 class="font-bold text-sm mb-2">Copy Saved on This Device:</h3>
           <p class="text-xs text-muted mb-2">
-            Your data is stored safely in a local SQLite file on your laptop:
+            Every change is also saved in this browser. If the server loses its data (Render's free plan
+            resets it when the app sleeps or redeploys), the app puts this copy back automatically the
+            next time you open it here.
           </p>
-          <code class="block bg-surface-2 p-3 rounded text-xs font-mono mb-3">
-            epic-davinci/data/tracker.db
-          </code>
           <p class="text-xs text-muted">
-            To create a manual backup, simply copy <code class="font-mono">tracker.db</code> to another directory or external drive while the application is running or stopped.
+            The copy lives only in this browser on this device — clearing site data removes it, so
+            exporting JSON now and then is still a good extra backup.
           </p>
         </div>
       </div>

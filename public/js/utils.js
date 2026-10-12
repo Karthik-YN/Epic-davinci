@@ -105,6 +105,11 @@ async function _request(url, options = {}) {
       throw Object.assign(new Error(msg), { status: res.status, data });
     }
 
+    // Data changed: let the browser backup refresh its copy (see localBackup.js)
+    if (options.method && options.method !== 'GET' && !url.startsWith('/api/export/')) {
+      window.dispatchEvent(new CustomEvent('data-changed'));
+    }
+
     return data;
   } catch (err) {
     if (err.name === 'TypeError') {
