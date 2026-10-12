@@ -578,6 +578,55 @@ describe('Nutrition targets', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Browser backup restore (server lost its data)
+// ---------------------------------------------------------------------------
+describe('Restore from a browser copy', () => {
+  test('export carries the database instance id', async () => {
+    const res = await request(app).get('/api/export/json');
+    expect(typeof res.body.instanceId).toBe('string');
+    expect(res.body.instanceId.length).toBeGreaterThan(10);
+  });
+
+  test('restore brings back deleted challenges, notes and logs', async () => {
+    const created = await request(app).post('/api/challenges').send({
+      name: 'Backup Test', start_date: '2027-01-01', end_date: '2027-01-21', priority: 'low',
+    });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+    await request(app).post(`/api/challenges/${id}/notes`).send({ content: 'remember me' });
+    await request(app).post('/api/logs/2027-01-02').send({ weight_kg: 72 });
+
+    const backup = (await request(app).get('/api/export/json')).body;
+    await request(app).delete(`/api/challenges/${id}`); // also removes its notes
+
+    const res = await request(app).post('/api/export/restore').send(backup);
+    expect(res.status).toBe(200);
+    expect(res.body.restored.challenges).toBe(1);
+
+    const back = await request(app).get(`/api/challenges/${id}`);
+    expect(back.status).toBe(200);
+    expect(back.body.name).toBe('Backup Test');
+    const notes = await request(app).get(`/api/challenges/${id}/notes`);
+    expect(notes.body.map(n => n.content)).toContain('remember me');
+    const log = await request(app).get('/api/logs/2027-01-02');
+    expect(log.body.weight_kg).toBe(72);
+  });
+
+  test('an older copy never overwrites newer edits', async () => {
+    const backup = (await request(app).get('/api/export/json')).body;
+    const ch = backup.challenges.find(c => c.name === 'Backup Test');
+    await new Promise(r => setTimeout(r, 5));
+    await request(app).put(`/api/challenges/${ch.id}`).send({ ...ch, name: 'Renamed Later' });
+    await request(app).post('/api/logs/2027-01-02').send({ weight_kg: 71 });
+
+    const res = await request(app).post('/api/export/restore').send(backup);
+    expect(res.status).toBe(200);
+    expect((await request(app).get(`/api/challenges/${ch.id}`)).body.name).toBe('Renamed Later');
+    expect((await request(app).get('/api/logs/2027-01-02')).body.weight_kg).toBe(71);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Cleanup: close DB after all tests
 // ---------------------------------------------------------------------------
 afterAll(() => {

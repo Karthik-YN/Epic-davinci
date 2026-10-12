@@ -27,8 +27,8 @@ const app = express();
 // CORS – allow LAN access from any origin
 app.use(cors());
 
-// Parse JSON request bodies (up to 1 MB)
-app.use(express.json({ limit: '1mb' }));
+// Parse JSON request bodies (up to 5 MB, room for a full restore)
+app.use(express.json({ limit: '5mb' }));
 
 // Serve static files from public/
 app.use(express.static(path.join(__dirname, '../public')));

@@ -85,6 +85,11 @@ Render will build your project in ~1-2 minutes and give you your live web app UR
 ## 💡 Note on Render Free Tier Behavior
 
 - **Sleep mode:** If you don't open the app for 15 minutes, Render puts the free service into sleep mode to save energy. When you open your link, it will take ~30-40 seconds for the first page load to wake up the server. Subsequent taps will be instant.
+- **Copy saved in your browser:** Every change is also saved in the browser you use (localStorage).
+  If Render wipes the server's data, the app puts that copy back automatically the next time you open
+  it in the same browser — so your challenges survive even **without** Turso. The copy is per browser
+  and per device: clearing site data deletes it, and a phone and laptop each keep their own copy.
+  Turso (Step 2) is still the most reliable option, especially if you use several devices.
 - **Data Persistence:** With Turso configured, all data lives in the Turso database and survives sleep, restarts and redeploys. Without it, data is lost whenever Render restarts the app. Exporting JSON from **Settings** now and then is still a good backup.
 - **Running locally:** without the Turso variables, the app uses the local file `data/tracker.db`.
   To work against your Turso data from your laptop, set the same two variables before `npm start`.
