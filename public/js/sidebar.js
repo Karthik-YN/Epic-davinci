@@ -71,7 +71,7 @@ function _renderChallengeCard(challenge) {
     el.innerHTML = `
       <div class="sidebar-challenge-empty">
         <div class="text-sm font-semibold">No challenge selected</div>
-        <a href="#challenges" class="nav-link sidebar-switch" data-page="challenges">Choose or create one →</a>
+        <a href="#challenges" class="sidebar-switch">Choose or create one →</a>
       </div>
     `;
     return;
@@ -88,7 +88,7 @@ function _renderChallengeCard(challenge) {
     <div class="sidebar-challenge-card priority-${escapeHtml(challenge.priority)}">
       <div class="flex items-center justify-between gap-2">
         <span class="priority-pill priority-${escapeHtml(challenge.priority)}">${PRIORITY_LABELS[challenge.priority] || 'Medium'} priority</span>
-        <a href="#challenges" class="nav-link sidebar-switch" data-page="challenges">Switch</a>
+        <a href="#challenges" class="sidebar-switch">Switch</a>
       </div>
       <div class="sidebar-challenge-name">${escapeHtml(challenge.name)}</div>
       <div class="sidebar-challenge-dates">${formatDateShort(challenge.start_date)} – ${formatDate(challenge.end_date)} · ${TOTAL_DAYS} days</div>

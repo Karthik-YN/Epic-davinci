@@ -831,8 +831,8 @@ export class DailyLog {
       });
 
       input.addEventListener('change', () => {
+        // 'input' already marked the form dirty; saving here only flushes pending edits
         this._updateFormValue(input);
-        this._markDirty();
         this.save(); // Immediate save on change
       });
     });
